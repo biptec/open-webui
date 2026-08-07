@@ -539,6 +539,20 @@ async def get_builtin_tools(
         builtin_tools = model.get('info', {}).get('meta', {}).get('builtinTools', {})
         return builtin_tools.get(category, True)
 
+    # Individual function settings are stored as e.g. memoryFunctions/knowledgeFunctions.
+    # Missing settings default to enabled so existing model metadata keeps its behavior.
+    def is_builtin_tool_function_enabled(category: str, function_name: str) -> bool:
+        builtin_tools = model.get('info', {}).get('meta', {}).get('builtinTools', {})
+        function_settings = builtin_tools.get(f'{category}Functions', {})
+        if not isinstance(function_settings, dict):
+            return True
+        return function_settings.get(function_name, True)
+
+    def add_builtin_functions(category: str, functions) -> None:
+        builtin_functions.extend(
+            function for function in functions if is_builtin_tool_function_enabled(category, function.__name__)
+        )
+
     # Helper to check user-level feature permission (admins always pass)
     user = extra_params.get('__user__', {})
     config = await Config.get_many(
@@ -604,28 +618,28 @@ async def get_builtin_tools(
         from open_webui.env import ENABLE_KB_EXEC
 
         if ENABLE_KB_EXEC:
-            builtin_functions.append(kb_exec)
-            builtin_functions.append(query_knowledge_files)
+            add_builtin_functions('knowledge', [kb_exec, query_knowledge_files])
             # Notes attached to the model need view_note since kb_exec is file-only
             if model_knowledge:
                 knowledge_types = {item.get('type') for item in model_knowledge}
                 if 'note' in knowledge_types:
-                    builtin_functions.append(view_note)
+                    add_builtin_functions('knowledge', [view_note])
             if not model_knowledge:
-                builtin_functions.append(query_knowledge_bases)
-                builtin_functions.append(search_knowledge_bases)
+                add_builtin_functions('knowledge', [query_knowledge_bases, search_knowledge_bases])
         elif model_knowledge:
-            builtin_functions.extend(
-                [list_knowledge, search_knowledge_files, grep_knowledge_files, query_knowledge_files]
+            add_builtin_functions(
+                'knowledge',
+                [list_knowledge, search_knowledge_files, grep_knowledge_files, query_knowledge_files],
             )
 
             knowledge_types = {item.get('type') for item in model_knowledge}
             if 'file' in knowledge_types or 'collection' in knowledge_types:
-                builtin_functions.extend([view_file, view_knowledge_file])
+                add_builtin_functions('knowledge', [view_file, view_knowledge_file])
             if 'note' in knowledge_types:
-                builtin_functions.append(view_note)
+                add_builtin_functions('knowledge', [view_note])
         else:
-            builtin_functions.extend(
+            add_builtin_functions(
+                'knowledge',
                 [
                     list_knowledge_bases,
                     search_knowledge_bases,
@@ -634,7 +648,7 @@ async def get_builtin_tools(
                     search_knowledge_files,
                     query_knowledge_files,
                     view_knowledge_file,
-                ]
+                ],
             )
 
     # Chats tools - search and fetch user's chat history
@@ -656,7 +670,8 @@ async def get_builtin_tools(
         and get_model_capability('memory')
         and await has_user_permission('memories')
     ):
-        builtin_functions.extend(
+        add_builtin_functions(
+            'memory',
             [
                 search_memories,
                 list_memory_paths,
@@ -666,7 +681,7 @@ async def get_builtin_tools(
                 add_memory,
                 replace_memory_content,
                 delete_memory,
-            ]
+            ],
         )
 
     # Add web search tools if builtin category enabled AND enabled globally AND model has web_search capability
