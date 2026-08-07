@@ -71,6 +71,28 @@
 		}
 	};
 
+	const functionLabels: Record<string, string> = {
+		search_memories: 'Search memories',
+		list_memory_paths: 'List memory paths',
+		read_memory_path: 'Read memory path',
+		list_memories: 'List memories',
+		update_memory: 'Update memory',
+		add_memory: 'Add memory',
+		replace_memory_content: 'Replace memory content',
+		delete_memory: 'Delete memory',
+		list_knowledge_bases: 'List knowledge bases',
+		search_knowledge_bases: 'Search knowledge bases',
+		query_knowledge_bases: 'Query knowledge bases',
+		list_knowledge: 'List knowledge',
+		grep_knowledge_files: 'Grep knowledge files',
+		search_knowledge_files: 'Search knowledge files',
+		query_knowledge_files: 'Query knowledge files',
+		view_knowledge_file: 'View knowledge file',
+		view_file: 'View file',
+		view_note: 'View note',
+		kb_exec: 'KB exec'
+	};
+
 	const toolFunctions: Partial<Record<keyof typeof toolLabels, string[]>> = {
 		memory: [
 			'search_memories',
@@ -179,12 +201,15 @@
 					<div class="ml-2 mt-1 space-y-1 border-l border-gray-100 pl-2 dark:border-gray-800">
 						{#each toolFunctions[tool] ?? [] as functionName}
 							<div class="flex min-h-6 items-center justify-between gap-2.5">
-								<code
-									class="min-w-0 truncate text-[10px] text-gray-500 dark:text-gray-500"
-									class:opacity-50={builtinTools[tool] === false}>{functionName}</code
-								>
+								<Tooltip content={marked.parse(`\`${functionName}\``)}>
+									<span
+										class="min-w-0 truncate text-[11px] text-gray-500 dark:text-gray-500"
+										class:opacity-50={builtinTools[tool] === false}
+										>{$i18n.t(functionLabels[functionName] ?? functionName)}</span
+									>
+								</Tooltip>
 								<Checkbox
-									ariaLabel={functionName}
+									ariaLabel={$i18n.t(functionLabels[functionName] ?? functionName)}
 									disabled={builtinTools[tool] === false}
 									state={isFunctionEnabled(tool, functionName) ? 'checked' : 'unchecked'}
 									on:change={(e) => {
