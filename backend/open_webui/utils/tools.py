@@ -352,6 +352,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
 
                 tool_dict = {
                     'tool_id': tool_id,
+                    'instruction_ids': [f'tool:{tool_id}'],
                     'callable': callable,
                     'spec': spec,
                     # Misc info
@@ -458,6 +459,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
 
                         tool_dict = {
                             'tool_id': tool_id,
+                            'instruction_ids': [f'tool:{tool_id}'],
                             'callable': callable,
                             'spec': clean_openai_tool_schema(spec),
                             # Misc info
@@ -526,6 +528,7 @@ async def get_builtin_tools(
     """
     tools_dict = {}
     builtin_functions = []
+    builtin_function_categories: dict[str, set[str]] = {}
     features = features or {}
     model = model or {}
 
@@ -549,9 +552,11 @@ async def get_builtin_tools(
         return function_settings.get(function_name, True)
 
     def add_builtin_functions(category: str, functions) -> None:
-        builtin_functions.extend(
-            function for function in functions if is_builtin_tool_function_enabled(category, function.__name__)
-        )
+        for function in functions:
+            if not is_builtin_tool_function_enabled(category, function.__name__):
+                continue
+            builtin_functions.append(function)
+            builtin_function_categories.setdefault(function.__name__, set()).add(category)
 
     # Helper to check user-level feature permission (admins always pass)
     user = extra_params.get('__user__', {})
@@ -589,7 +594,7 @@ async def get_builtin_tools(
 
     # Time utilities - available for date calculations
     if is_builtin_tool_enabled('time'):
-        builtin_functions.extend([get_current_timestamp, calculate_timestamp])
+        add_builtin_functions('time', [get_current_timestamp, calculate_timestamp])
 
     metadata = extra_params.get('__metadata__') or {}
     chat_files = metadata.get('files') or extra_params.get('__files__') or []
@@ -608,7 +613,7 @@ async def get_builtin_tools(
         and has_chat_files
         and await has_user_chat_permission('file_upload')
     ):
-        builtin_functions.extend([list_chat_files, query_chat_files, grep_chat_files, view_file])
+        add_builtin_functions('files', [list_chat_files, query_chat_files, grep_chat_files, view_file])
 
     # Knowledge base tools - conditional injection based on model knowledge
     # If model has attached knowledge (any type), only provide query_knowledge_files
@@ -653,7 +658,7 @@ async def get_builtin_tools(
 
     # Chats tools - search and fetch user's chat history
     if is_builtin_tool_enabled('chats'):
-        builtin_functions.extend([search_chats, view_chat])
+        add_builtin_functions('chats', [search_chats, view_chat])
 
     if (
         is_builtin_tool_enabled('subagents')
@@ -661,7 +666,7 @@ async def get_builtin_tools(
         and getattr(request.state, 'internal', False) is not True
         and getattr(request.state, 'direct', False) is not True
     ):
-        builtin_functions.extend([delegate_task, timer])
+        add_builtin_functions('subagents', [delegate_task, timer])
 
     # Add memory tools when memory is enabled and the model allows this builtin category.
     if (
@@ -692,7 +697,7 @@ async def get_builtin_tools(
         and features.get('web_search')
         and await has_user_permission('web_search')
     ):
-        builtin_functions.extend([search_web, fetch_url])
+        add_builtin_functions('web_search', [search_web, fetch_url])
 
     # Add image generation/edit tools if builtin category enabled,
     # globally enabled, and allowed by model capability.
@@ -703,7 +708,7 @@ async def get_builtin_tools(
         and features.get('image_generation')
         and await has_user_permission('image_generation')
     ):
-        builtin_functions.append(generate_image)
+        add_builtin_functions('image_generation', [generate_image])
     if (
         is_builtin_tool_enabled('image_generation')
         and config.get('images.edit.enable')
@@ -711,7 +716,7 @@ async def get_builtin_tools(
         and features.get('image_generation')
         and await has_user_permission('image_generation')
     ):
-        builtin_functions.append(edit_image)
+        add_builtin_functions('image_generation', [edit_image])
 
     # Add code interpreter tool if builtin category enabled,
     # globally enabled, and allowed by model capability.
@@ -722,7 +727,7 @@ async def get_builtin_tools(
         and features.get('code_interpreter')
         and await has_user_permission('code_interpreter')
     ):
-        builtin_functions.append(execute_code)
+        add_builtin_functions('code_interpreter', [execute_code])
 
     chat_id = metadata.get('chat_id') or ''
     chat = None
@@ -733,27 +738,23 @@ async def get_builtin_tools(
     if (chat and (chat.meta or {}).get('internal') is True and (chat.meta or {}).get('type') == 'note') or (
         is_builtin_tool_enabled('notes') and config.get('notes.enable') and await has_user_permission('notes')
     ):
-        builtin_functions.extend([search_notes, view_note, write_note, replace_note_content])
+        add_builtin_functions('notes', [search_notes, view_note, write_note, replace_note_content])
 
     # Channels tools - search channels and messages
     if is_builtin_tool_enabled('channels') and config.get('channels.enable') and await has_user_permission('channels'):
-        builtin_functions.extend(
-            [
-                search_channels,
-                search_channel_messages,
-                view_channel_thread,
-                view_channel_message,
-            ]
+        add_builtin_functions(
+            'channels',
+            [search_channels, search_channel_messages, view_channel_thread, view_channel_message],
         )
 
     # Skills tools - view_skill allows model to load full skill instructions on demand
     if extra_params.get('__skill_ids__'):
-        builtin_functions.append(view_skill)
+        add_builtin_functions('skills', [view_skill])
 
     # Task management - break down complex work into trackable steps
     # Task state is stored on the chats row; local/channel IDs do not have one.
     if is_builtin_tool_enabled('tasks') and is_saved_chat_id(chat_id):
-        builtin_functions.extend([create_tasks, update_task])
+        add_builtin_functions('tasks', [create_tasks, update_task])
 
     # Automation tools - create and manage scheduled automations from chat
     if (
@@ -761,14 +762,16 @@ async def get_builtin_tools(
         and config.get('automations.enable')
         and await has_user_permission('automations')
     ):
-        builtin_functions.extend(
-            [create_automation, update_automation, list_automations, toggle_automation, delete_automation]
+        add_builtin_functions(
+            'automations',
+            [create_automation, update_automation, list_automations, toggle_automation, delete_automation],
         )
 
     # Calendar tools - search/create/update/delete events
     if is_builtin_tool_enabled('calendar') and config.get('calendar.enable') and await has_user_permission('calendar'):
-        builtin_functions.extend(
-            [search_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event]
+        add_builtin_functions(
+            'calendar',
+            [search_calendar_events, create_calendar_event, update_calendar_event, delete_calendar_event],
         )
 
     if (
@@ -776,7 +779,7 @@ async def get_builtin_tools(
         and config.get('ui.enable_user_webhooks')
         and await has_user_permission('webhooks')
     ):
-        builtin_functions.append(notify)
+        add_builtin_functions('notifications', [notify])
 
     if getattr(request.state, 'internal', False) is True:
         from open_webui.utils.subagents import MUTATING_MEMORY_TOOLS
@@ -809,6 +812,10 @@ async def get_builtin_tools(
 
         tools_dict[func.__name__] = {
             'tool_id': f'builtin:{func.__name__}',
+            'instruction_ids': [
+                f'builtin:{category}'
+                for category in sorted(builtin_function_categories.get(func.__name__, {func.__name__}))
+            ],
             'callable': callable,
             'spec': spec,
             'type': 'builtin',
@@ -1416,6 +1423,7 @@ async def get_terminal_tools(
 
         tools_dict[function_name] = {
             'tool_id': f'terminal:{terminal_id}',
+            'instruction_ids': [f'terminal:{terminal_id}'],
             'callable': callable,
             'spec': tool_spec,
             'type': 'terminal',

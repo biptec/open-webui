@@ -128,6 +128,7 @@ from open_webui.utils.task import (
     rag_template,
     tools_function_calling_generation_template,
 )
+from open_webui.utils.tool_instructions import build_tool_instructions_prompt, get_tool_instruction_ids
 from open_webui.utils.tools import (
     build_tool_server_headers,
     get_attached_knowledge,
@@ -2527,6 +2528,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     features = form_data.pop('features', None) or {}
     extra_params['__features__'] = features
+    legacy_code_interpreter_active = False
     if features:
         if 'voice' in features and features['voice']:
             if await Config.get('task.voice.prompt.enable'):
@@ -2581,6 +2583,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     prompt,
                     form_data['messages'],
                 )
+                legacy_code_interpreter_active = True
             else:
                 # Native FC: tool docstring can't be dynamic, so inject
                 # filesystem context into the system message for pyodide
@@ -2768,6 +2771,8 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                             tool_function = await make_tool_function(client, tool_spec['name'])
 
                             mcp_tools_dict[f'{server_id}_{tool_spec["name"]}'] = {
+                                'tool_id': f'server:mcp:{server_id}',
+                                'instruction_ids': [f'tool:server:mcp:{server_id}'],
                                 'spec': {
                                     **tool_spec,
                                     'name': f'{server_id}_{tool_spec["name"]}',
@@ -2898,6 +2903,18 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             for name, tool_dict in builtin_tools.items():
                 if name not in tools_dict:
                     tools_dict[name] = tool_dict
+
+        instruction_ids = get_tool_instruction_ids(tools_dict)
+        if legacy_code_interpreter_active and 'builtin:code_interpreter' not in instruction_ids:
+            instruction_ids.append('builtin:code_interpreter')
+
+        tool_instructions_prompt = build_tool_instructions_prompt(model, instruction_ids)
+        if tool_instructions_prompt:
+            form_data['messages'] = add_or_update_system_message(
+                tool_instructions_prompt,
+                form_data['messages'],
+                append=True,
+            )
 
         if tools_dict:
             # Always store resolved tools in metadata so downstream consumers

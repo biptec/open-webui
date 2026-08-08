@@ -30,6 +30,7 @@
 	import BuiltinTools from './BuiltinTools.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
 	import TerminalSelector from './TerminalSelector.svelte';
+	import ToolInstructions from './ToolInstructions.svelte';
 	import TTSVoiceInput from './TTSVoiceInput.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
 	import AccessButton from '$lib/components/common/AccessButton.svelte';
@@ -96,7 +97,7 @@
 	};
 
 	let knowledge = [];
-	let toolIds = [];
+	let toolIds: string[] = [];
 	let skillIds = [];
 	let skillsList = [];
 
@@ -106,6 +107,7 @@
 	let capabilities = { ...DEFAULT_CAPABILITIES };
 	let defaultFeatureIds = [];
 	let builtinTools = {};
+	let toolInstructions: Record<string, string> = {};
 
 	let actionIds = [];
 	let accessGrants = [];
@@ -333,6 +335,12 @@
 			}
 		}
 
+		if (Object.keys(toolInstructions).length > 0) {
+			info.meta.toolInstructions = toolInstructions;
+		} else if (info.meta.toolInstructions) {
+			delete info.meta.toolInstructions;
+		}
+
 		if (terminalId) {
 			info.meta.terminalId = terminalId;
 		} else {
@@ -393,6 +401,7 @@
 		capabilities = { ...DEFAULT_CAPABILITIES, ...(defaultMeta.capabilities ?? {}) };
 		defaultFeatureIds = defaultMeta.defaultFeatureIds ?? [];
 		builtinTools = defaultMeta.builtinTools ?? {};
+		toolInstructions = { ...(defaultMeta.toolInstructions ?? {}) };
 
 		// Scroll to top 'workspace-container' element
 		const workspaceContainer = document.getElementById('workspace-container');
@@ -462,6 +471,7 @@
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
 			defaultFeatureIds = model?.meta?.defaultFeatureIds ?? defaultFeatureIds;
 			builtinTools = model?.meta?.builtinTools ?? builtinTools;
+			toolInstructions = { ...toolInstructions, ...(model?.meta?.toolInstructions ?? {}) };
 			terminalId = model?.meta?.terminalId ?? '';
 			tts = { voice: model?.meta?.tts?.voice ?? '' };
 
@@ -975,6 +985,18 @@
 								<TerminalSelector bind:terminalId />
 							</div>
 						{/if}
+
+						<div class="my-3">
+							<ToolInstructions
+								bind:toolInstructions
+								{builtinTools}
+								builtinEnabled={capabilities.builtin_tools}
+								tools={$tools ?? []}
+								selectedToolIds={toolIds}
+								{terminalId}
+								terminalEnabled={capabilities.terminal}
+							/>
+						</div>
 
 						<div class="my-3">
 							<div class="flex w-full justify-between mb-1">
