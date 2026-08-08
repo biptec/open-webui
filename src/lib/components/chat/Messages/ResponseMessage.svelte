@@ -189,6 +189,36 @@
 		getOutputText(message.output) || removeAllDetails(message.content ?? '');
 	$: hasResponseContent = Boolean((message.content ?? '').trim() || message.output?.length);
 
+	$: inlineToolImages = (() => {
+		const seen = new Set<string>();
+		const messageFileUrls = new Set((message?.files ?? []).map((file) => file.url));
+		const images: Array<{ type: string; url: string; content_type?: string }> = [];
+
+		for (const item of message?.output ?? []) {
+			if (item?.type !== 'function_call_output' || !Array.isArray(item.files)) continue;
+
+			for (const file of item.files) {
+				if (!file || typeof file !== 'object') continue;
+				const candidate = file as { type?: string; url?: string; content_type?: string };
+				const isImage =
+					candidate.type === 'image' || (candidate.content_type ?? '').startsWith('image/');
+				if (
+					!isImage ||
+					!candidate.url ||
+					seen.has(candidate.url) ||
+					messageFileUrls.has(candidate.url)
+				) {
+					continue;
+				}
+
+				seen.add(candidate.url);
+				images.push({ type: 'image', url: candidate.url, content_type: candidate.content_type });
+			}
+		}
+
+		return images;
+	})();
+
 	let edit = false;
 	let editedContent = '';
 	let editedOutput: any[] | null = null;
@@ -873,6 +903,17 @@
 										updateChat();
 									}}
 								/>
+							{/if}
+
+							{#if inlineToolImages.length > 0}
+								<div
+									class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"
+									dir={$settings?.chatDirection ?? 'auto'}
+								>
+									{#each inlineToolImages as file}
+										<Image src={file.url} alt={message.content || 'Tool result image'} />
+									{/each}
+								</div>
 							{/if}
 
 							{#if message?.error}
