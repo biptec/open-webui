@@ -1,8 +1,9 @@
 name: Build release container image
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 concurrency:
@@ -28,8 +29,6 @@ jobs:
       - name: Resolve release tags
         id: release
         shell: bash
-        env:
-          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
 
@@ -55,9 +54,7 @@ jobs:
             echo 'tags<<EOF'
             echo "${image}:${tag}"
             echo "${image}:${version}"
-            if [[ "${PRERELEASE:-false}" != "true" ]]; then
-              echo "${image}:latest"
-            fi
+            echo "${image}:latest"
             echo 'EOF'
           } >> "${GITHUB_OUTPUT}"
 
