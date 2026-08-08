@@ -28,6 +28,7 @@
 	export let tools: Tool[] = [];
 	export let terminalId = '';
 	export let terminalEnabled = true;
+	export let showAllBuiltins = false;
 
 	let terminals: TerminalServer[] = [];
 	let expanded: Record<string, boolean> = {};
@@ -55,9 +56,9 @@
 	$: instructionItems = (() => {
 		const items: InstructionItem[] = [];
 
-		if (builtinEnabled) {
+		if (builtinEnabled || showAllBuiltins) {
 			for (const [id, definition] of Object.entries(BUILTIN_TOOL_DEFINITIONS)) {
-				if (builtinTools[id] === false) continue;
+				if (!showAllBuiltins && builtinTools[id] === false) continue;
 				items.push({
 					id: `builtin:${id}`,
 					name: $i18n.t(definition.label),
