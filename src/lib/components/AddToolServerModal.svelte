@@ -35,6 +35,7 @@
 	export let connection = null;
 
 	let inputElement = null;
+	let iconInputElement = null;
 
 	let type = 'openapi'; // 'openapi', 'mcp'
 
@@ -54,6 +55,7 @@
 	let id = '';
 	let name = '';
 	let description = '';
+	let icon = '';
 
 	let oauthClientInfo = null;
 
@@ -73,6 +75,32 @@
 		'bg-transparent outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700';
 	const selectClass =
 		'bg-transparent pr-5 outline-hidden placeholder:text-gray-300 dark:placeholder:text-gray-700';
+
+	const iconUploadHandler = (event) => {
+		const file = event.currentTarget?.files?.[0];
+		if (!file) return;
+
+		const allowedTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+		if (!allowedTypes.includes(file.type)) {
+			toast.error($i18n.t('Icon must be a PNG, JPEG, WebP, or GIF image'));
+			event.currentTarget.value = '';
+			return;
+		}
+
+		if (file.size > 512 * 1024) {
+			toast.error($i18n.t('Icon file must not exceed 512 KB'));
+			event.currentTarget.value = '';
+			return;
+		}
+
+		const reader = new FileReader();
+		reader.onload = () => {
+			if (typeof reader.result === 'string') icon = reader.result;
+		};
+		reader.onerror = () => toast.error($i18n.t('Failed to read icon file'));
+		reader.readAsDataURL(file);
+		event.currentTarget.value = '';
+	};
 
 	const registerOAuthClientHandler = async () => {
 		if (url === '') {
@@ -185,7 +213,8 @@
 				info: {
 					id,
 					name,
-					description
+					description,
+					...(icon ? { icon } : {})
 				}
 			}).catch((err) => {
 				toast.error($i18n.t('Connection failed'));
@@ -233,6 +262,7 @@
 					id = data.info.id ?? '';
 					name = data.info.name ?? '';
 					description = data.info.description ?? '';
+					icon = data.info.icon ?? '';
 					oauthScope = data.info.oauth_scope ?? '';
 					oauthResourceParameter = data.info.oauth_resource_parameter ?? 'auto';
 				}
@@ -269,6 +299,7 @@
 					id: id,
 					name: name,
 					description: description,
+					...(icon ? { icon } : {}),
 					...(type === 'mcp' && ['oauth_2.1', 'oauth_2.1_static'].includes(auth_type)
 						? {
 								...(oauthScope ? { oauth_scope: oauthScope } : {}),
@@ -358,6 +389,7 @@
 				id: id,
 				name: name,
 				description: description,
+				...(icon ? { icon } : {}),
 				...(type === 'mcp' && ['oauth_2.1', 'oauth_2.1_static'].includes(auth_type)
 					? {
 							...(oauthScope ? { oauth_scope: oauthScope } : {}),
@@ -394,6 +426,7 @@
 		id = '';
 		name = '';
 		description = '';
+		icon = '';
 
 		oauthClientInfo = null;
 		oauthClientId = '';
@@ -424,6 +457,7 @@
 			id = connection.info?.id ?? '';
 			name = connection.info?.name ?? '';
 			description = connection.info?.description ?? '';
+			icon = connection.info?.icon ?? '';
 			oauthClientInfo = connection.info?.oauth_client_info ?? null;
 			oauthClientId = connection.info?.oauth_client_id ?? '';
 			oauthClientSecret = connection.info?.oauth_client_secret ?? '';
@@ -591,6 +625,53 @@
 								/>
 							</div>
 						</div>
+
+						{#if type === 'mcp'}
+							<div class="flex flex-col w-full mb-1.5">
+								<div class="mb-0.5 text-xs text-gray-500">{$i18n.t('Icon')}</div>
+								<input
+									bind:this={iconInputElement}
+									type="file"
+									accept="image/png,image/jpeg,image/webp,image/gif"
+									hidden
+									on:change={iconUploadHandler}
+								/>
+								<div class="flex items-center gap-2">
+									<button
+										type="button"
+										class="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+										on:click={() => iconInputElement?.click()}
+									>
+										{#if icon}
+											<img
+												src={icon}
+												alt={$i18n.t('Tool icon')}
+												class="size-7 rounded-md object-contain"
+											/>
+										{:else}
+											<div
+												class="flex size-7 items-center justify-center rounded-md border border-dashed border-gray-300 text-gray-400 dark:border-gray-700"
+											>
+												+
+											</div>
+										{/if}
+										<span>{icon ? $i18n.t('Change icon') : $i18n.t('Upload icon')}</span>
+									</button>
+									{#if icon}
+										<button
+											type="button"
+											class="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+											on:click={() => (icon = '')}
+										>
+											{$i18n.t('Remove')}
+										</button>
+									{/if}
+								</div>
+								<div class="mt-0.5 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+									{$i18n.t('PNG, JPEG, WebP, or GIF. Maximum 512 KB.')}
+								</div>
+							</div>
+						{/if}
 
 						<div class="flex gap-2">
 							<div class="flex flex-col w-full">

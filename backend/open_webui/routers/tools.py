@@ -115,6 +115,7 @@ async def get_tools(
                     'name': server.get('openapi', {}).get('info', {}).get('title', 'Tool Server'),
                     'meta': {
                         'description': server.get('openapi', {}).get('info', {}).get('description', ''),
+                        'icon': (connection.get('info') or {}).get('icon'),
                     },
                     'updated_at': int(time.time()),
                     'created_at': int(time.time()),
@@ -151,6 +152,7 @@ async def get_tools(
                         'name': info.get('name', 'MCP Tool Server'),
                         'meta': {
                             'description': info.get('description', ''),
+                            'icon': info.get('icon'),
                         },
                         'updated_at': int(time.time()),
                         'created_at': int(time.time()),
