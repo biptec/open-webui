@@ -216,8 +216,18 @@ class DoclingLoader:
             )
         if r.ok:
             result = r.json()
-            document_data = result.get('document', {})
-            md_content = document_data.get('md_content', '')
+            document_data = result.get('document') or {}
+            md_content = document_data.get('md_content') or ''
+            errors = result.get('errors') or []
+            error_messages = [
+                error.get('error_message') for error in errors if isinstance(error, dict) and error.get('error_message')
+            ]
+            conversion_status = str(result.get('status') or '').lower()
+
+            if conversion_status in {'failure', 'skipped'} or (not md_content and error_messages):
+                detail = '; '.join(error_messages) or conversion_status or 'unknown conversion error'
+                raise Exception(f'Error calling Docling: {detail}')
+
             text = md_content or '<No text content found>'
 
             metadata = {'Content-Type': self.mime_type} if self.mime_type else {}
