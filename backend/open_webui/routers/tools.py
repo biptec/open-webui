@@ -150,6 +150,7 @@ async def get_tools(
                         'id': tool_id,
                         'user_id': tool_id,
                         'name': info.get('name', 'MCP Tool Server'),
+                        'auth_type': auth_type,
                         'meta': {
                             'description': info.get('description', ''),
                             'icon': info.get('icon'),
