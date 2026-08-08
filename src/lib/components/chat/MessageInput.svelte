@@ -72,7 +72,6 @@
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import ModelSelector from './ModelSelector.svelte';
 
-	import ToolServersModal from './ToolServersModal.svelte';
 	import SkillsModal from './SkillsModal.svelte';
 
 	import RichTextInput from '../common/RichTextInput.svelte';
@@ -553,7 +552,6 @@
 		['/', '#', '@', '$', ':'].includes(command?.charAt(0)) || '\\#' === command?.slice(0, 2);
 	let suggestions = null;
 
-	let showTools = false;
 	let showSkills = false;
 
 	let loaded = false;
@@ -667,6 +665,29 @@
 
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
+
+	type SelectedToolDisplay = { id: string; name: string; icon?: string | null };
+	let selectedToolDisplays: SelectedToolDisplay[] = [];
+	$: selectedToolDisplays = (selectedToolIds ?? []).map((toolId: string) => {
+		const tool = (($tools ?? []) as any[]).find((item: any) => item.id === toolId);
+		if (tool) {
+			return { id: toolId, name: tool.name ?? toolId, icon: tool.meta?.icon ?? null };
+		}
+
+		if (toolId.startsWith('direct_server:')) {
+			const serverIndex = Number(toolId.slice('direct_server:'.length));
+			const server = Number.isInteger(serverIndex)
+				? (($toolServers ?? []) as any[])[serverIndex]
+				: null;
+			return {
+				id: toolId,
+				name: server?.info?.title ?? server?.openapi?.info?.title ?? server?.url ?? toolId,
+				icon: server?.info?.icon ?? server?.openapi?.info?.icon ?? null
+			};
+		}
+
+		return { id: toolId, name: toolId };
+	});
 
 	let showSkillsButton = false;
 	$: showSkillsButton = ($skills ?? []).some((skill) => skill.is_active);
@@ -1339,7 +1360,6 @@
 	});
 </script>
 
-<ToolServersModal bind:show={showTools} {selectedToolIds} />
 <SkillsModal bind:show={showSkills} {selectedSkillIds} />
 
 <InputVariablesModal
@@ -2038,28 +2058,35 @@
 										{/if}
 
 										<div class="ml-1 flex gap-1.5 shrink-0">
-											{#if (selectedToolIds ?? []).length > 0}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: (selectedToolIds ?? []).length
-													})}
-												>
+											{#each selectedToolDisplays as selectedTool (selectedTool.id)}
+												<Tooltip content={selectedTool.name} placement="top">
 													<button
-														class="translate-y-[0.5px] px-1 flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg self-center transition"
-														aria-label="Available Tools"
 														type="button"
-														on:click={() => {
-															showTools = !showTools;
+														aria-label={`Disable ${selectedTool.name}`}
+														on:click|preventDefault={() => {
+															selectedToolIds = selectedToolIds.filter(
+																(id) => id !== selectedTool.id
+															);
 														}}
+														class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
 													>
-														<Wrench className="size-4" strokeWidth="1.75" />
-
-														<span class="text-sm">
-															{(selectedToolIds ?? []).length}
-														</span>
+														{#if selectedTool.icon}
+															<img
+																src={selectedTool.icon}
+																alt=""
+																class="size-3.5 shrink-0 rounded-sm object-contain"
+															/>
+														{:else}
+															<Wrench className="size-3.5 shrink-0" strokeWidth="1.75" />
+														{/if}
+														<span class="max-w-[8rem] truncate">{selectedTool.name}</span>
+														<XMark
+															className="size-3.5 shrink-0 opacity-60 group-hover:opacity-100"
+															strokeWidth="1.75"
+														/>
 													</button>
 												</Tooltip>
-											{/if}
+											{/each}
 
 											{#if (selectedSkillIds ?? []).length > 0}
 												<Tooltip

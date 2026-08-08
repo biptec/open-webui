@@ -42,7 +42,11 @@
 					: ''}"
 			>
 				<Tooltip content={connection?.type === 'mcp' ? $i18n.t('MCP') : $i18n.t('OpenAPI')}>
-					<WrenchAlt />
+					{#if connection?.info?.icon}
+						<img src={connection.info.icon} alt="" class="size-4 rounded-sm object-contain" />
+					{:else}
+						<WrenchAlt />
+					{/if}
 				</Tooltip>
 
 				{#if connection?.info?.name}
