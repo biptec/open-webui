@@ -327,6 +327,13 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
                     # Merge capabilities: defaults as base, per-model overrides win
                     existing = meta.get('capabilities') or {}
                     meta['capabilities'] = {**value, **existing}
+                elif key == 'toolInstructions' and isinstance(value, dict):
+                    # Global tool instructions are defaults; per-model entries override by tool ID.
+                    existing = meta.get('toolInstructions')
+                    if existing is None:
+                        meta['toolInstructions'] = copy.deepcopy(value)
+                    elif isinstance(existing, dict):
+                        meta['toolInstructions'] = {**value, **existing}
                 elif meta.get(key) is None:
                     meta[key] = copy.deepcopy(value)
 

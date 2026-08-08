@@ -7,12 +7,14 @@
 	import { config as appConfig } from '$lib/stores';
 	import { DEFAULT_CAPABILITIES } from '$lib/constants';
 	import { getModelsConfig, setModelsConfig, setDefaultPromptSuggestions } from '$lib/apis/configs';
+	import { getTools } from '$lib/apis/tools';
 	import { getBackendConfig } from '$lib/apis';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import DefaultFeatures from '$lib/components/workspace/Models/DefaultFeatures.svelte';
 	import BuiltinTools from '$lib/components/workspace/Models/BuiltinTools.svelte';
+	import ToolInstructions from '$lib/components/workspace/Models/ToolInstructions.svelte';
 	import PromptSuggestions from '$lib/components/workspace/Models/PromptSuggestions.svelte';
 
 	export let initHandler = () => {};
@@ -24,6 +26,7 @@
 	let expanded = false;
 	let showCapabilities = false;
 	let showParameters = false;
+	let showToolInstructions = false;
 	let showPromptSuggestions = false;
 	let savedSnapshot = '';
 
@@ -31,6 +34,8 @@
 	let defaultFeatureIds = [];
 	let defaultParams = {};
 	let builtinTools = {};
+	let toolInstructions = {};
+	let availableTools = [];
 	let promptSuggestions = [];
 
 	$: configuredParams = Object.entries(defaultParams ?? {}).filter(
@@ -47,6 +52,7 @@
 			defaultFeatureIds,
 			defaultParams: Object.fromEntries(configuredParams),
 			builtinTools,
+			toolInstructions,
 			promptSuggestions: promptSuggestions.filter((p) => p.content !== '')
 		});
 
@@ -58,6 +64,7 @@
 	const init = async () => {
 		loading = true;
 		config = await getModelsConfig(localStorage.token);
+		availableTools = (await getTools(localStorage.token).catch(() => null)) ?? [];
 
 		modelIds = config?.MODEL_ORDER_LIST || [];
 
@@ -66,10 +73,12 @@
 			defaultCapabilities = savedMeta.capabilities ?? { ...DEFAULT_CAPABILITIES };
 			defaultFeatureIds = savedMeta.defaultFeatureIds ?? [];
 			builtinTools = savedMeta.builtinTools ?? {};
+			toolInstructions = savedMeta.toolInstructions ?? {};
 		} else {
 			defaultCapabilities = { ...DEFAULT_CAPABILITIES };
 			defaultFeatureIds = [];
 			builtinTools = {};
+			toolInstructions = {};
 		}
 
 		defaultParams = config?.DEFAULT_MODEL_PARAMS ?? {};
@@ -87,7 +96,8 @@
 		const metadata = {
 			capabilities: defaultCapabilities,
 			...(defaultFeatureIds.length > 0 ? { defaultFeatureIds } : {}),
-			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {})
+			...(Object.keys(builtinTools).length > 0 ? { builtinTools } : {}),
+			...(Object.keys(toolInstructions).length > 0 ? { toolInstructions } : {})
 		};
 
 		const res = await setModelsConfig(localStorage.token, {
@@ -182,6 +192,35 @@
 									<BuiltinTools bind:builtinTools />
 								</div>
 							{/if}
+						</div>
+					{/if}
+				</div>
+
+				<div>
+					<button
+						class="flex w-full items-center justify-between gap-4 py-0.5 text-left"
+						type="button"
+						on:click={() => {
+							showToolInstructions = !showToolInstructions;
+						}}
+					>
+						<span class="text-xs text-gray-600 dark:text-gray-400">
+							{$i18n.t('Tool Instructions')}
+						</span>
+						<span class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
+							{showToolInstructions ? $i18n.t('Close') : $i18n.t('Configure')}
+						</span>
+					</button>
+
+					{#if showToolInstructions}
+						<div class="pb-2" on:change={updateDirty} on:input={updateDirty}>
+							<ToolInstructions
+								bind:toolInstructions
+								{builtinTools}
+								builtinEnabled={true}
+								tools={availableTools}
+								showAllBuiltins={true}
+							/>
 						</div>
 					{/if}
 				</div>
