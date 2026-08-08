@@ -2,13 +2,14 @@
 	import { toast } from 'svelte-sonner';
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 	import { getModels as _getModels } from '$lib/apis';
+	import { getTools } from '$lib/apis/tools';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	import { models, settings, user, terminalServers } from '$lib/stores';
+	import { models, settings, user, terminalServers, tools } from '$lib/stores';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -67,6 +68,7 @@
 		});
 
 		if (res) {
+			tools.set(await getTools(localStorage.token));
 			toast.success($i18n.t('Connections saved successfully'));
 		}
 	};
