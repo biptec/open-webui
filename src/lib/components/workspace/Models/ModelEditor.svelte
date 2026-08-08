@@ -992,7 +992,6 @@
 								{builtinTools}
 								builtinEnabled={capabilities.builtin_tools}
 								tools={$tools ?? []}
-								selectedToolIds={toolIds}
 								{terminalId}
 								terminalEnabled={capabilities.terminal}
 							/>

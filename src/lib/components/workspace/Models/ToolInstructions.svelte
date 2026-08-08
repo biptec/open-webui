@@ -26,7 +26,6 @@
 	export let builtinTools: Record<string, boolean | Record<string, boolean>> = {};
 	export let builtinEnabled = true;
 	export let tools: Tool[] = [];
-	export let selectedToolIds: string[] = [];
 	export let terminalId = '';
 	export let terminalEnabled = true;
 
@@ -68,9 +67,9 @@
 			}
 		}
 
-		const toolsById = new Map(tools.map((tool) => [tool.id, tool]));
-		for (const id of selectedToolIds) {
-			const tool = toolsById.get(id);
+		// Keep instructions configurable for tools that can be enabled later from the chat UI.
+		for (const tool of tools) {
+			const id = tool.id;
 			items.push({
 				id: `tool:${id}`,
 				name: tool?.name || id,
