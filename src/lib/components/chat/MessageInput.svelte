@@ -2080,10 +2080,9 @@
 															<Wrench className="size-3.5 shrink-0" strokeWidth="1.75" />
 														{/if}
 														<span class="max-w-[8rem] truncate">{selectedTool.name}</span>
-														<XMark
-															className="size-3.5 shrink-0 opacity-60 group-hover:opacity-100"
-															strokeWidth="1.75"
-														/>
+														<div class="hidden group-hover:block">
+															<XMark className="size-3.5 shrink-0" strokeWidth="1.75" />
+														</div>
 													</button>
 												</Tooltip>
 											{/each}
@@ -2181,7 +2180,8 @@
 															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
 															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
 													>
-														<GlobeAlt className="size-4" strokeWidth="1.75" />
+														<GlobeAlt className="size-4 shrink-0" strokeWidth="1.75" />
+														<span class="max-w-[8rem] truncate">{$i18n.t('Web Search')}</span>
 														<div class="hidden group-hover:block">
 															<XMark className="size-4" strokeWidth="1.75" />
 														</div>

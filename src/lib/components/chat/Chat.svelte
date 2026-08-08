@@ -487,7 +487,7 @@
 	}
 
 	const onSelectedModelIdsChange = () => {
-		resetInput();
+		resetInput({ preserveIntegrations: true });
 		oldSelectedModelIds = structuredClone(selectedModelIds);
 	};
 
@@ -707,7 +707,14 @@
 		initiateOAuthRedirect(nextTool);
 	};
 
-	const resetInput = async () => {
+	type ResetInputOptions = { preserveIntegrations?: boolean };
+
+	const resetInput = async ({ preserveIntegrations = false }: ResetInputOptions = {}) => {
+		const previousToolIds = preserveIntegrations ? [...selectedToolIds] : [];
+		const previousWebSearchEnabled = preserveIntegrations && webSearchEnabled;
+		const previousImageGenerationEnabled = preserveIntegrations && imageGenerationEnabled;
+		const previousCodeInterpreterEnabled = preserveIntegrations && codeInterpreterEnabled;
+
 		selectedToolIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
@@ -718,6 +725,58 @@
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			await setDefaults();
+		}
+
+		if (!preserveIntegrations) return;
+
+		const availableToolIds = new Set(
+			($tools ?? []).filter((tool) => tool.authenticated !== false).map((tool) => tool.id)
+		);
+		($toolServers ?? []).forEach((_server, index) =>
+			availableToolIds.add(`direct_server:${index}`)
+		);
+
+		selectedToolIds = [
+			...new Set([
+				...selectedToolIds,
+				...previousToolIds.filter((toolId) => availableToolIds.has(toolId))
+			])
+		];
+
+		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
+		const allModelsSupport = (capability: string) =>
+			currentModels.length > 0 &&
+			currentModels.every(
+				(modelId) =>
+					$models.find((model) => model.id === modelId)?.info?.meta?.capabilities?.[capability] ??
+					true
+			);
+
+		if (
+			previousWebSearchEnabled &&
+			allModelsSupport('web_search') &&
+			$config?.features?.enable_web_search &&
+			($user?.role === 'admin' || $user?.permissions?.features?.web_search)
+		) {
+			webSearchEnabled = true;
+		}
+
+		if (
+			previousImageGenerationEnabled &&
+			allModelsSupport('image_generation') &&
+			$config?.features?.enable_image_generation &&
+			($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+		) {
+			imageGenerationEnabled = true;
+		}
+
+		if (
+			previousCodeInterpreterEnabled &&
+			allModelsSupport('code_interpreter') &&
+			$config?.features?.enable_code_interpreter &&
+			($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+		) {
+			codeInterpreterEnabled = true;
 		}
 	};
 
