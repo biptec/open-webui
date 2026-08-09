@@ -99,9 +99,20 @@ jobs:
           provenance: mode=max
           build-args: |
             BUILD_HASH=${{ github.sha }}
+            OPEN_WEBUI_VERSION=${{ steps.release.outputs.version }}
 
       - name: Verify published image
         shell: bash
         run: |
-          docker buildx imagetools inspect \
-            "${{ steps.release.outputs.image }}:${{ steps.release.outputs.tag }}"
+          set -euo pipefail
+          image="${{ steps.release.outputs.image }}:${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+
+          docker buildx imagetools inspect "$image"
+          docker pull "$image"
+
+          docker run --rm --entrypoint python -e WEBUI_SECRET_KEY=release-version-verification "$image" -c \
+            "from open_webui.env import VERSION; assert VERSION == '$version', VERSION"
+
+          docker run --rm --entrypoint sh "$image" -c \
+            "grep -R -F -m1 '$version' /app/build >/dev/null"
