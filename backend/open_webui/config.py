@@ -1309,6 +1309,10 @@ LINKUP_SEARCH_PARAMS = linkup_search_params
 
 ENABLE_IMAGE_GENERATION = os.getenv('ENABLE_IMAGE_GENERATION', '').lower() == 'true'
 
+IMAGE_GENERATION_SOURCE = os.getenv('IMAGE_GENERATION_SOURCE', 'custom')
+
+IMAGE_GENERATION_MODEL_ID = os.getenv('IMAGE_GENERATION_MODEL_ID', '')
+
 IMAGE_GENERATION_ENGINE = os.getenv('IMAGE_GENERATION_ENGINE', 'openai')
 
 IMAGE_GENERATION_MODEL = os.getenv('IMAGE_GENERATION_MODEL', '')
@@ -1482,6 +1486,10 @@ IMAGES_GEMINI_API_KEY = os.getenv('IMAGES_GEMINI_API_KEY', GEMINI_API_KEY)
 IMAGES_GEMINI_ENDPOINT_METHOD = os.getenv('IMAGES_GEMINI_ENDPOINT_METHOD', '')
 
 ENABLE_IMAGE_EDIT = os.getenv('ENABLE_IMAGE_EDIT', '').lower() == 'true'
+
+IMAGE_EDIT_SOURCE = os.getenv('IMAGE_EDIT_SOURCE', 'custom')
+
+IMAGE_EDIT_MODEL_ID = os.getenv('IMAGE_EDIT_MODEL_ID', '')
 
 IMAGE_EDIT_ENGINE = os.getenv('IMAGE_EDIT_ENGINE', 'openai')
 
@@ -2977,6 +2985,8 @@ DEFAULT_CONFIG = {
     'web.search.linkup_api_key': LINKUP_API_KEY,
     'web.search.linkup_search_params': LINKUP_SEARCH_PARAMS,
     'image_generation.enable': ENABLE_IMAGE_GENERATION,
+    'image_generation.source': IMAGE_GENERATION_SOURCE,
+    'image_generation.model_id': IMAGE_GENERATION_MODEL_ID,
     'image_generation.engine': IMAGE_GENERATION_ENGINE,
     'image_generation.model': IMAGE_GENERATION_MODEL,
     'image_generation.size': IMAGE_SIZE,
@@ -2997,6 +3007,8 @@ DEFAULT_CONFIG = {
     'image_generation.gemini.api_key': IMAGES_GEMINI_API_KEY,
     'image_generation.gemini.endpoint_method': IMAGES_GEMINI_ENDPOINT_METHOD,
     'images.edit.enable': ENABLE_IMAGE_EDIT,
+    'images.edit.source': IMAGE_EDIT_SOURCE,
+    'images.edit.model_id': IMAGE_EDIT_MODEL_ID,
     'images.edit.engine': IMAGE_EDIT_ENGINE,
     'images.edit.model': IMAGE_EDIT_MODEL,
     'images.edit.size': IMAGE_EDIT_SIZE,
