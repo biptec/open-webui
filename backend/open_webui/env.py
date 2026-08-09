@@ -142,7 +142,7 @@ else:
     except Exception:
         PACKAGE_DATA = {'version': '0.0.0'}
 
-VERSION = PACKAGE_DATA['version']
+VERSION = os.getenv('OPEN_WEBUI_VERSION') or PACKAGE_DATA['version']
 
 
 DEPLOYMENT_ID = os.getenv('DEPLOYMENT_ID', '')

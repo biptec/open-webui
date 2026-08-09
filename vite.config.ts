@@ -17,7 +17,7 @@ export default defineConfig({
 		})
 	],
 	define: {
-		APP_VERSION: JSON.stringify(process.env.npm_package_version),
+		APP_VERSION: JSON.stringify(process.env.OPEN_WEBUI_VERSION || process.env.npm_package_version),
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	build: {
