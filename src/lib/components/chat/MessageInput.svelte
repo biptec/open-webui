@@ -2217,7 +2217,8 @@
 															? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
 															: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
 													>
-														<Photo className="size-4" strokeWidth="1.75" />
+														<Photo className="size-4 shrink-0" strokeWidth="1.75" />
+														<span class="max-w-[8rem] truncate">{$i18n.t('Image')}</span>
 														<div class="hidden group-hover:block">
 															<XMark className="size-4" strokeWidth="1.75" />
 														</div>
