@@ -570,6 +570,7 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
 async def get_model_profile_image(
     request: Request,
     id: str,
+    v: str | None = None,
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -619,7 +620,19 @@ async def get_model_profile_image(
                     'X-Content-Type-Options': 'nosniff',
                 }
                 if updated_at:
-                    headers['ETag'] = f'"{updated_at}"'
+                    etag = f'"{updated_at}"'
+                    headers['ETag'] = etag
+                    headers['Cache-Control'] = (
+                        'private, max-age=31536000, immutable'
+                        if v == str(updated_at)
+                        else 'private, max-age=0, must-revalidate'
+                    )
+
+                    if request.headers.get('if-none-match') == etag:
+                        return Response(
+                            status_code=status.HTTP_304_NOT_MODIFIED,
+                            headers=headers,
+                        )
 
                 return StreamingResponse(
                     image_buffer,
