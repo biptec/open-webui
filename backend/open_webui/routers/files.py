@@ -6,7 +6,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import quote
 
 from fastapi import (
@@ -507,6 +507,7 @@ async def search_files(
     content: bool = Query(True),
     skip: int = Query(0, ge=0, description='Number of files to skip'),
     limit: int = Query(100, ge=1, le=1000, description='Maximum number of files to return'),
+    origin: Literal['all', 'uploads', 'generated'] = Query('all', description='Filter files by origin'),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
@@ -523,6 +524,7 @@ async def search_files(
         filename=filename,
         skip=skip,
         limit=limit,
+        origin=origin,
         db=db,
     )
 
@@ -547,11 +549,12 @@ async def search_files(
 
 @router.get('/count', response_model=int)
 async def count_files(
+    origin: Literal['all', 'uploads', 'generated'] = Query('all', description='Filter files by origin'),
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
-    return await Files.count_files_by_user_id(user_id=user_id, db=db)
+    return await Files.count_files_by_user_id(user_id=user_id, origin=origin, db=db)
 
 
 ############################

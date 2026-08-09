@@ -9,7 +9,7 @@ import time
 from open_webui.internal.db import Base, JSONField, get_async_db_context
 from open_webui.utils.misc import sanitize_metadata
 from pydantic import BaseModel, ConfigDict, model_validator
-from sqlalchemy import JSON, BigInteger, Column, String, Text, delete, func, select
+from sqlalchemy import JSON, BigInteger, Column, String, Text, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
@@ -200,15 +200,33 @@ class FilesTable:
             result = await db.execute(select(File))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
+    @staticmethod
+    def _apply_origin_filter(stmt, origin: str):
+        artifact_origin = File.meta['data']['artifact_origin'].as_string()
+        legacy_generated = File.filename.ilike('generated-image%')
+
+        if origin == 'generated':
+            return stmt.where(or_(artifact_origin == 'generated', legacy_generated))
+        if origin == 'uploads':
+            return stmt.where(
+                and_(
+                    func.coalesce(artifact_origin, '') != 'generated',
+                    ~legacy_generated,
+                )
+            )
+        return stmt
+
     async def count_files_by_user_id(
         self,
         user_id: str | None = None,
+        origin: str = 'all',
         db: AsyncSession | None = None,
     ) -> int:
         async with get_async_db_context(db) as db:
             stmt = select(func.count(File.id))
             if user_id:
                 stmt = stmt.filter_by(user_id=user_id)
+            stmt = self._apply_origin_filter(stmt, origin)
             result = await db.execute(stmt)
             return result.scalar() or 0
 
@@ -300,6 +318,7 @@ class FilesTable:
         filename: str = '*',
         skip: int = 0,
         limit: int = 100,
+        origin: str = 'all',
         db: AsyncSession | None = None,
     ) -> list[FileModel]:
         """
@@ -325,6 +344,7 @@ class FilesTable:
             if pattern != '%':
                 stmt = stmt.filter(File.filename.ilike(pattern, escape='\\'))
 
+            stmt = self._apply_origin_filter(stmt, origin)
             result = await db.execute(stmt.order_by(File.created_at.desc(), File.id.desc()).offset(skip).limit(limit))
             return [FileModel.model_validate(file) for file in result.scalars().all()]
 
