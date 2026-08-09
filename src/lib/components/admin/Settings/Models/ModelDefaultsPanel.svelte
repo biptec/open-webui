@@ -213,7 +213,11 @@
 					</button>
 
 					{#if showToolInstructions}
-						<div class="pb-2" on:change={updateDirty} on:input={updateDirty}>
+						<div
+							class="max-h-[24rem] overflow-y-auto pb-2 pr-1 scrollbar-hover"
+							on:change={updateDirty}
+							on:input={updateDirty}
+						>
 							<ToolInstructions
 								bind:toolInstructions
 								{builtinTools}
