@@ -184,7 +184,8 @@ export const searchFiles = async (
 	filename: string = '*',
 	skip: number = 0,
 	limit: number = 50,
-	content: boolean = false
+	content: boolean = false,
+	origin: 'all' | 'uploads' | 'generated' = 'all'
 ) => {
 	let error = null;
 
@@ -193,6 +194,7 @@ export const searchFiles = async (
 	searchParams.append('skip', String(skip));
 	searchParams.append('limit', String(limit));
 	searchParams.append('content', String(content));
+	searchParams.append('origin', origin);
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/search?${searchParams.toString()}`, {
 		method: 'GET',
@@ -219,10 +221,15 @@ export const searchFiles = async (
 	return res;
 };
 
-export const getFileCount = async (token: string = '') => {
+export const getFileCount = async (
+	token: string = '',
+	origin: 'all' | 'uploads' | 'generated' = 'all'
+) => {
 	let error = null;
 
-	const res = await fetch(`${WEBUI_API_BASE_URL}/files/count`, {
+	const searchParams = new URLSearchParams({ origin });
+
+	const res = await fetch(`${WEBUI_API_BASE_URL}/files/count?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
 			Accept: 'application/json',

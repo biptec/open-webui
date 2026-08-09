@@ -17,6 +17,7 @@
 	let items = [];
 	let selectedIdx = 0;
 	let query = '';
+	let originFilter: 'uploads' | 'generated' | 'all' = 'uploads';
 
 	let page = 0;
 	let limit = 50;
@@ -24,12 +25,13 @@
 	let allItemsLoaded = false;
 	let initialized = false;
 	let searchedQuery = '';
+	let searchedOrigin = originFilter;
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 	let requestId = 0;
 
 	// Only re-run the search when the query actually changes. Flipping `initialized`
 	// after the initial load would otherwise trigger a second, identical request.
-	$: if (initialized && query !== searchedQuery) {
+	$: if (initialized && (query !== searchedQuery || originFilter !== searchedOrigin)) {
 		scheduleSearch();
 	}
 
@@ -41,6 +43,7 @@
 	const init = async () => {
 		requestId += 1;
 		searchedQuery = query;
+		searchedOrigin = originFilter;
 		page = 0;
 		items = [];
 		selectedIdx = 0;
@@ -60,7 +63,14 @@
 		itemsLoading = true;
 		const value = query.trim();
 		const filename = value ? (/[?*]/.test(value) ? value : `*${value}*`) : '*';
-		let res = await searchFiles(localStorage.token, filename, page * limit, limit).catch(() => []);
+		let res = await searchFiles(
+			localStorage.token,
+			filename,
+			page * limit,
+			limit,
+			false,
+			originFilter
+		).catch(() => []);
 		if (activeRequestId !== requestId) return res;
 
 		if ((res ?? []).length < limit) {
@@ -98,6 +108,19 @@
 {#if loaded}
 	<div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
 		<SearchInput bind:value={query} placeholder={$i18n.t('Search Files')} />
+
+		<div class="flex items-center gap-1 px-1 pb-1 text-[11px] text-gray-500 dark:text-gray-400">
+			{#each [['uploads', 'Uploads'], ['generated', 'Generated'], ['all', 'All']] as [value, label]}
+				<button
+					type="button"
+					class="rounded-md px-1.5 py-0.5 {originFilter === value
+						? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
+						: 'hover:text-gray-700 dark:hover:text-gray-200'}"
+					on:click={() => (originFilter = value as 'uploads' | 'generated' | 'all')}
+					>{$i18n.t(label)}</button
+				>
+			{/each}
+		</div>
 
 		<div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin">
 			{#if items.length === 0 && itemsLoading}

@@ -25,6 +25,7 @@
 	let query = '';
 	let orderBy = 'created_at';
 	let direction = 'desc';
+	let originFilter: 'all' | 'uploads' | 'generated' = 'all';
 
 	let page = 0;
 	let allFilesLoaded = false;
@@ -49,6 +50,26 @@
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 	};
 
+	const isGeneratedFile = (file: any) =>
+		file?.meta?.data?.artifact_origin === 'generated' ||
+		file?.filename?.startsWith('generated-image');
+
+	const artifactSummary = (file: any) => {
+		if (!isGeneratedFile(file)) return '';
+		const data = file?.meta?.data ?? {};
+		const type = data.artifact_type === 'screenshot' ? $i18n.t('Screenshot') : $i18n.t('Generated');
+		const source = data.artifact_source_url
+			? (() => {
+					try {
+						return new URL(data.artifact_source_url).hostname;
+					} catch {
+						return '';
+					}
+				})()
+			: data.artifact_context || data.artifact_tool || data.artifact_model || '';
+		return [type, source].filter(Boolean).join(' · ');
+	};
+
 	const setSortKey = (key: string) => {
 		if (orderBy === key) {
 			direction = direction === 'asc' ? 'desc' : 'asc';
@@ -68,12 +89,19 @@
 
 		try {
 			const pattern = query ? `*${query}*` : '*';
-			const newFiles = await searchFiles(localStorage.token, pattern, 0, PAGE_SIZE);
+			const newFiles = await searchFiles(
+				localStorage.token,
+				pattern,
+				0,
+				PAGE_SIZE,
+				false,
+				originFilter
+			);
 			files = sortFiles(newFiles);
 			allFilesLoaded = newFiles.length < PAGE_SIZE;
 
 			if (!query) {
-				fileCount = await getFileCount(localStorage.token);
+				fileCount = await getFileCount(localStorage.token, originFilter);
 			}
 		} catch (error) {
 			// Handle 404 or other errors - show empty state instead of spinner
@@ -90,7 +118,14 @@
 
 		try {
 			const pattern = query ? `*${query}*` : '*';
-			const newFiles = await searchFiles(localStorage.token, pattern, page * PAGE_SIZE, PAGE_SIZE);
+			const newFiles = await searchFiles(
+				localStorage.token,
+				pattern,
+				page * PAGE_SIZE,
+				PAGE_SIZE,
+				false,
+				originFilter
+			);
 
 			allFilesLoaded = newFiles.length < PAGE_SIZE;
 
@@ -277,6 +312,21 @@
 				</div>
 			</div>
 
+			<div class="mb-2 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+				{#each [['all', 'All'], ['uploads', 'Uploads'], ['generated', 'Generated']] as [value, label]}
+					<button
+						type="button"
+						class="rounded-lg px-2 py-1 {originFilter === value
+							? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
+							: 'hover:text-gray-700 dark:hover:text-gray-200'}"
+						on:click={() => {
+							originFilter = value as 'all' | 'uploads' | 'generated';
+							searchHandler();
+						}}>{$i18n.t(label)}</button
+					>
+				{/each}
+			</div>
+
 			<!-- Files List -->
 			<div class="flex flex-col w-full">
 				{#if files !== null}
@@ -343,9 +393,18 @@
 									on:click={() => openFileViewer(file)}
 								>
 									<div class="basis-3/5 min-w-0">
-										<div class="text-ellipsis line-clamp-1">{file.filename}</div>
+										<div class="flex min-w-0 items-center gap-1.5">
+											<div class="min-w-0 text-ellipsis line-clamp-1">{file.filename}</div>
+											{#if isGeneratedFile(file)}
+												<span
+													class="shrink-0 rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+													>{$i18n.t('Generated')}</span
+												>
+											{/if}
+										</div>
 										<div class="text-xs text-gray-500">
-											{formatFileSize(file.meta?.size ?? 0)}
+											{#if artifactSummary(file)}{artifactSummary(file)} ·
+											{/if}{formatFileSize(file.meta?.size ?? 0)}
 										</div>
 									</div>
 

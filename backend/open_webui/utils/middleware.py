@@ -13,6 +13,7 @@ import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from aiocache import cached
@@ -869,6 +870,57 @@ async def apply_source_context_to_messages(
         )
 
 
+def _safe_artifact_source_url(value: str | None) -> str | None:
+    if not isinstance(value, str) or not value.startswith(('http://', 'https://')):
+        return None
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname:
+            return None
+        host = f'[{parsed.hostname}]' if ':' in parsed.hostname else parsed.hostname
+        port = f':{parsed.port}' if parsed.port else ''
+        return f'{parsed.scheme}://{host}{port}{parsed.path or ""}'
+    except Exception:
+        return None
+
+
+def _tool_artifact_metadata(tool_function_name, tool, tool_params, tool_result, metadata):
+    artifact_type = 'screenshot' if 'screenshot' in tool_function_name.lower() else 'tool-image'
+    tool_id = (tool or {}).get('tool_id', '')
+    tool_server = tool_id.removeprefix('server:mcp:') if tool_id else ''
+
+    source_url = None
+    for key in ('url', 'href', 'uri'):
+        source_url = _safe_artifact_source_url((tool_params or {}).get(key))
+        if source_url:
+            break
+
+    if not source_url and isinstance(tool_result, list):
+        for item in tool_result:
+            if not isinstance(item, dict) or item.get('type') != 'text':
+                continue
+            text = item.get('text', '')
+            if not isinstance(text, str):
+                continue
+            for match in re.findall(r'https?://[^\s<>"\']+', text):
+                source_url = _safe_artifact_source_url(match.rstrip('`.,);]'))
+                if source_url:
+                    break
+            if source_url:
+                break
+
+    return {
+        'chat_id': (metadata or {}).get('chat_id'),
+        'message_id': (metadata or {}).get('message_id'),
+        'session_id': (metadata or {}).get('session_id'),
+        'artifact_origin': 'generated',
+        'artifact_type': artifact_type,
+        'artifact_tool': tool_server or tool_id or 'tool',
+        'artifact_tool_name': tool_function_name,
+        **({'artifact_source_url': source_url} if source_url else {}),
+    }
+
+
 async def process_tool_result(
     request,
     tool_function_name,
@@ -877,6 +929,8 @@ async def process_tool_result(
     direct_tool=False,
     metadata=None,
     user=None,
+    tool=None,
+    tool_params=None,
 ):
     tool_result_embeds = []
     EXTERNAL_TOOL_TYPES = ('external', 'action', 'terminal')
@@ -1011,12 +1065,13 @@ async def process_tool_result(
                         file_url = await get_file_url_from_base64(
                             request,
                             f'data:{item.get("mimeType")};base64,{item.get("data", item.get("blob", ""))}',
-                            {
-                                'chat_id': metadata.get('chat_id', None),
-                                'message_id': metadata.get('message_id', None),
-                                'session_id': metadata.get('session_id', None),
-                                'result': item,
-                            },
+                            _tool_artifact_metadata(
+                                tool_function_name,
+                                tool,
+                                tool_params,
+                                tool_result,
+                                metadata,
+                            ),
                             user,
                         )
 
@@ -1279,6 +1334,8 @@ async def chat_completion_tools_handler(
                     direct_tool,
                     metadata,
                     user,
+                    tool,
+                    tool_function_params,
                 )
 
                 if event_emitter:
@@ -5063,6 +5120,8 @@ async def streaming_chat_response_handler(response, ctx):
                             direct_tool,
                             metadata,
                             user,
+                            tool,
+                            tool_function_params,
                         )
 
                         await terminal_event_handler(

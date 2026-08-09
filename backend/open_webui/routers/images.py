@@ -8,6 +8,7 @@ import logging
 import mimetypes
 import re
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
@@ -651,13 +652,64 @@ async def get_image_data(data: str, headers=None, trusted_base_url: str | None =
         return None, None
 
 
+def _artifact_slug(value: str | None, max_length: int = 72) -> str:
+    value = (value or '').strip().lower()
+    value = re.sub(r'[^a-z0-9]+', '-', value).strip('-')
+    return value[:max_length].rstrip('-')
+
+
+def _artifact_source_label(source_url: str | None) -> str:
+    if not source_url:
+        return ''
+    parsed = urlparse(source_url)
+    host = re.sub(r'[^a-z0-9.-]+', '-', (parsed.hostname or '').lower()).strip('-.')
+    path = _artifact_slug('-'.join([part for part in parsed.path.split('/') if part][:2]), max_length=48)
+    return '-'.join(part for part in (host, path) if part)[:72].rstrip('-')
+
+
+def _generated_image_filename(content_type: str, metadata: dict) -> str:
+    extension = mimetypes.guess_extension(content_type) or '.png'
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime('%Y%m%d-%H%M%S') + f'-{now.microsecond // 1000:03d}Z'
+    artifact_type = metadata.get('artifact_type', 'generated-image')
+
+    if artifact_type == 'screenshot':
+        subject = _artifact_source_label(metadata.get('artifact_source_url')) or _artifact_slug(
+            metadata.get('artifact_tool') or metadata.get('artifact_tool_name') or 'page'
+        )
+        return f'screenshot-{subject or "page"}-{timestamp}{extension}'
+
+    if artifact_type == 'image-generation':
+        subject = _artifact_slug(metadata.get('artifact_model') or metadata.get('model') or 'generated')
+        return f'image-{subject or "generated"}-{timestamp}{extension}'
+
+    if artifact_type == 'image-edit':
+        subject = _artifact_slug(metadata.get('artifact_model') or metadata.get('model') or 'generated')
+        return f'edited-image-{subject or "generated"}-{timestamp}{extension}'
+
+    subject = _artifact_slug(metadata.get('artifact_tool') or metadata.get('artifact_tool_name'))
+    return f'generated-image{f"-{subject}" if subject else ""}-{timestamp}{extension}'
+
+
 async def upload_image(request, image_data, content_type, metadata, user, db=None):
     if image_data is None or content_type is None:
         raise ValueError('Failed to retrieve image data from the generation backend')
-    image_format = mimetypes.guess_extension(content_type)
+    metadata = {**(metadata or {})}
+    metadata.setdefault('artifact_origin', 'generated')
+
+    if metadata.get('artifact_type') == 'screenshot' and not metadata.get('artifact_source_url'):
+        chat_id = metadata.get('chat_id')
+        if chat_id and user:
+            chat = await Chats.get_chat_by_id_and_user_id(chat_id, user.id, db=db)
+            if chat and chat.title:
+                metadata.setdefault('artifact_context', chat.title)
+
+    filename = _generated_image_filename(content_type, metadata)
+    metadata.setdefault('artifact_filename', filename)
+
     file = UploadFile(
         file=io.BytesIO(image_data),
-        filename=f'generated-image{image_format}',  # will be converted to a unique ID on upload_file
+        filename=filename,
         headers={
             'content-type': content_type,
         },
@@ -789,7 +841,13 @@ async def image_generations(
                 else:
                     image_data, content_type = await get_image_data(image['b64_json'])
 
-                _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                _, url = await upload_image(
+                    request,
+                    image_data,
+                    content_type,
+                    {**data, **metadata, 'artifact_type': 'image-generation', 'artifact_model': model},
+                    user,
+                )
                 images.append({'url': url})
             return images
 
@@ -847,7 +905,13 @@ async def image_generations(
                 else:
                     image_data, content_type = await get_image_data(image['b64_json'])
 
-                _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                _, url = await upload_image(
+                    request,
+                    image_data,
+                    content_type,
+                    {**data, **metadata, 'artifact_type': 'image-generation', 'artifact_model': model},
+                    user,
+                )
                 images.append({'url': url})
             return images
 
@@ -891,7 +955,13 @@ async def image_generations(
             if model.endswith(':predict'):
                 for image in res['predictions']:
                     image_data, content_type = await get_image_data(image['bytesBase64Encoded'])
-                    _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                    _, url = await upload_image(
+                        request,
+                        image_data,
+                        content_type,
+                        {**data, **metadata, 'artifact_type': 'image-generation', 'artifact_model': model},
+                        user,
+                    )
                     images.append({'url': url})
             elif model.endswith(':generateContent'):
                 for image in res['candidates']:
@@ -902,7 +972,7 @@ async def image_generations(
                                 request,
                                 image_data,
                                 content_type,
-                                {**data, **metadata},
+                                {**data, **metadata, 'artifact_type': 'image-generation', 'artifact_model': model},
                                 user,
                             )
                             images.append({'url': url})
@@ -1207,7 +1277,13 @@ async def image_edits(
                 else:
                     image_data, content_type = await get_image_data(image['b64_json'])
 
-                _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                _, url = await upload_image(
+                    request,
+                    image_data,
+                    content_type,
+                    {**data, **metadata, 'artifact_type': 'image-edit', 'artifact_model': model},
+                    user,
+                )
                 images.append({'url': url})
             return images
 
@@ -1286,7 +1362,13 @@ async def image_edits(
                 else:
                     image_data, content_type = await get_image_data(image['b64_json'])
 
-                _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                _, url = await upload_image(
+                    request,
+                    image_data,
+                    content_type,
+                    {**data, **metadata, 'artifact_type': 'image-edit', 'artifact_model': model},
+                    user,
+                )
                 images.append({'url': url})
             return images
 
@@ -1340,7 +1422,7 @@ async def image_edits(
                             request,
                             image_data,
                             content_type,
-                            {**data, **metadata},
+                            {**data, **metadata, 'artifact_type': 'image-edit', 'artifact_model': model},
                             user,
                         )
                         images.append({'url': url})
