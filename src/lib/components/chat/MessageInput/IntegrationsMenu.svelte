@@ -35,6 +35,7 @@
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import LinkSlash from '$lib/components/icons/LinkSlash.svelte';
+	import McpToolIcon from './McpToolIcon.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -183,7 +184,13 @@
 									<div class="flex flex-1 gap-2 items-center">
 										<Tooltip content={tools[toolId]?.name ?? ''} placement="top">
 											<div class="shrink-0">
-												{#if tools[toolId]?.meta?.icon}
+												{#if toolId.startsWith('server:mcp:') || toolId.startsWith('direct_server:')}
+													<McpToolIcon
+														name={tools[toolId]?.name ?? ''}
+														className="size-4"
+														strokeWidth="1.75"
+													/>
+												{:else if tools[toolId]?.meta?.icon}
 													<img
 														src={tools[toolId].meta.icon}
 														alt=""
