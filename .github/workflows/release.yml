@@ -1,20 +1,60 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Release — Create GitHub release from CHANGELOG, trigger Docker builds
-# Runs on pushes to main when package.json version changes
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Release - Create GitHub release from CHANGELOG and trigger the Docker build.
+# Runs only when package.json changes, and publishes only when its version changes.
+# -----------------------------------------------------------------------------
 name: Release
 
 on:
   push:
     branches: [main]
+    paths:
+      - package.json
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  # ── Create release and trigger downstream workflows ──────────────────────
+  detect-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Detect package version change
+        id: version
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          current="$(jq -r '.version' package.json)"
+          previous=""
+
+          if [[ -n "${BEFORE_SHA}" ]] &&
+             [[ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]] &&
+             git cat-file -e "${BEFORE_SHA}:package.json" 2>/dev/null; then
+            previous="$(git show "${BEFORE_SHA}:package.json" | jq -r '.version')"
+          fi
+
+          echo "version=${current}" >> "${GITHUB_OUTPUT}"
+
+          if [[ -n "${previous}" && "${current}" == "${previous}" ]]; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "package.json changed, but version stayed at ${current}; skipping release"
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+            echo "package version changed: ${previous:-unknown} -> ${current}"
+          fi
+
   publish:
+    needs: detect-version
+    if: needs.detect-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -23,32 +63,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Abort if package.json unchanged
-        run: |
-          git diff --cached --diff-filter=d package.json || {
-            echo "package.json not modified — skipping release"
-            exit 1
-          }
-
-      - name: Read version
-        id: pkg
-        run: echo "version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
-
       - name: Extract release notes from CHANGELOG
         run: |
-          VER="${{ steps.pkg.outputs.version }}"
-          awk "/^## \[${VER}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" \
+          VER="${{ needs.detect-version.outputs.version }}"
+          awk "/^## \\[${VER}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" \
             CHANGELOG.md > /tmp/release-notes.md
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.detect-version.outputs.version }}
         run: |
-          if gh release view "v${{ steps.pkg.outputs.version }}" &>/dev/null; then
-            echo "Release v${{ steps.pkg.outputs.version }} already exists — skipping creation"
+          if gh release view "v${VERSION}" &>/dev/null; then
+            echo "Release v${VERSION} already exists - skipping creation"
           else
-            gh release create "v${{ steps.pkg.outputs.version }}" \
-              --title "v${{ steps.pkg.outputs.version }}" \
+            gh release create "v${VERSION}" \
+              --title "v${VERSION}" \
               --notes-file /tmp/release-notes.md
           fi
 
@@ -59,8 +89,6 @@ jobs:
           path: |
             .
             !.git
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trigger Docker build
         uses: actions/github-script@v8
@@ -70,5 +98,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'docker.yaml',
-              ref: 'v${{ steps.pkg.outputs.version }}',
+              ref: 'v${{ needs.detect-version.outputs.version }}',
             })
