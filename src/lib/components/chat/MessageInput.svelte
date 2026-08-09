@@ -92,6 +92,7 @@
 	import Voice from '../icons/Voice.svelte';
 	import Terminal from '../icons/Terminal.svelte';
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
+	import McpToolIcon from './MessageInput/McpToolIcon.svelte';
 	import TerminalMenu from './MessageInput/TerminalMenu.svelte';
 	import Component from '../icons/Component.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
@@ -666,12 +667,22 @@
 	let showToolsButton = false;
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
 
-	type SelectedToolDisplay = { id: string; name: string; icon?: string | null };
+	type SelectedToolDisplay = {
+		id: string;
+		name: string;
+		icon?: string | null;
+		isMcpServer?: boolean;
+	};
 	let selectedToolDisplays: SelectedToolDisplay[] = [];
 	$: selectedToolDisplays = (selectedToolIds ?? []).map((toolId: string) => {
 		const tool = (($tools ?? []) as any[]).find((item: any) => item.id === toolId);
 		if (tool) {
-			return { id: toolId, name: tool.name ?? toolId, icon: tool.meta?.icon ?? null };
+			return {
+				id: toolId,
+				name: tool.name ?? toolId,
+				icon: tool.meta?.icon ?? null,
+				isMcpServer: toolId.startsWith('server:mcp:')
+			};
 		}
 
 		if (toolId.startsWith('direct_server:')) {
@@ -682,7 +693,8 @@
 			return {
 				id: toolId,
 				name: server?.info?.title ?? server?.openapi?.info?.title ?? server?.url ?? toolId,
-				icon: server?.info?.icon ?? server?.openapi?.info?.icon ?? null
+				icon: server?.info?.icon ?? server?.openapi?.info?.icon ?? null,
+				isMcpServer: true
 			};
 		}
 
@@ -2070,7 +2082,13 @@
 														}}
 														class="group px-2 py-[5px] flex gap-1.5 items-center text-xs rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20"
 													>
-														{#if selectedTool.icon}
+														{#if selectedTool.isMcpServer}
+															<McpToolIcon
+																name={selectedTool.name}
+																className="size-3.5 shrink-0"
+																strokeWidth="1.75"
+															/>
+														{:else if selectedTool.icon}
 															<img
 																src={selectedTool.icon}
 																alt=""
