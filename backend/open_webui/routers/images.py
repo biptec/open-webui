@@ -30,11 +30,15 @@ from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
+from open_webui.models.models import Models
 from open_webui.retrieval.web.utils import get_ssrf_safe_session, validate_url
+from open_webui.routers import openai
 from open_webui.routers.files import get_file_content_by_id, upload_file_handler
 from open_webui.utils.access_control import has_permission
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import include_user_info_headers
+from open_webui.utils.model_ids import strip_provider_model_prefix
+from open_webui.utils.models import get_all_models as get_all_registered_models
 from open_webui.utils.images.comfyui import (
     ComfyUICreateImageForm,
     ComfyUIEditImageForm,
@@ -67,6 +71,8 @@ IMAGE_FILE_EXTENSIONS = {
 IMAGE_CONFIG_KEYS = {
     'ENABLE_IMAGE_GENERATION': 'image_generation.enable',
     'ENABLE_IMAGE_PROMPT_GENERATION': 'image_generation.prompt.enable',
+    'IMAGE_GENERATION_SOURCE': 'image_generation.source',
+    'IMAGE_GENERATION_MODEL_ID': 'image_generation.model_id',
     'IMAGE_GENERATION_ENGINE': 'image_generation.engine',
     'IMAGE_GENERATION_MODEL': 'image_generation.model',
     'IMAGE_SIZE': 'image_generation.size',
@@ -86,6 +92,8 @@ IMAGE_CONFIG_KEYS = {
     'IMAGES_GEMINI_API_KEY': 'image_generation.gemini.api_key',
     'IMAGES_GEMINI_ENDPOINT_METHOD': 'image_generation.gemini.endpoint_method',
     'ENABLE_IMAGE_EDIT': 'images.edit.enable',
+    'IMAGE_EDIT_SOURCE': 'images.edit.source',
+    'IMAGE_EDIT_MODEL_ID': 'images.edit.model_id',
     'IMAGE_EDIT_ENGINE': 'images.edit.engine',
     'IMAGE_EDIT_MODEL': 'images.edit.model',
     'IMAGE_EDIT_SIZE': 'images.edit.size',
@@ -109,6 +117,90 @@ async def get_config_values(key_map: dict[str, str]) -> dict:
 
 async def get_image_config() -> SimpleNamespace:
     return SimpleNamespace(**await get_config_values(IMAGE_CONFIG_KEYS))
+
+
+def _resolve_openai_runtime_model_id(model_id: str, openai_models: dict, db_models: dict) -> str | None:
+    current_id = model_id
+    seen = set()
+
+    while current_id and current_id not in seen:
+        if current_id in openai_models:
+            return current_id
+
+        seen.add(current_id)
+        model_info = db_models.get(current_id)
+        current_id = model_info.base_model_id if model_info else None
+
+    return None
+
+
+async def get_registered_image_models(request: Request, user) -> list[dict]:
+    models = await get_all_registered_models(request, refresh=True, user=user)
+    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
+    db_models = {model.id: model for model in await Models.get_all_models()}
+
+    result = []
+    for model in models:
+        model_id = model.get('id')
+        if not model_id or model.get('arena') or model.get('direct'):
+            continue
+
+        runtime_id = _resolve_openai_runtime_model_id(model_id, openai_models, db_models)
+        if not runtime_id:
+            continue
+
+        meta = model.get('info', {}).get('meta', {}) or {}
+        result.append(
+            {
+                'id': model_id,
+                'name': model.get('name') or model_id,
+                'hidden': bool(meta.get('hidden', False)),
+                'provider': model.get('provider') or openai_models.get(runtime_id, {}).get('provider') or '',
+            }
+        )
+
+    return result
+
+
+async def resolve_registered_image_connection(request: Request, model_id: str, user, metadata: dict | None = None):
+    if not model_id:
+        raise HTTPException(status_code=400, detail='Image model is not configured')
+
+    await get_all_registered_models(request, refresh=False, user=user)
+    openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
+    db_models = {model.id: model for model in await Models.get_all_models()}
+    runtime_id = _resolve_openai_runtime_model_id(model_id, openai_models, db_models)
+
+    if not runtime_id:
+        await get_all_registered_models(request, refresh=True, user=user)
+        openai_models = getattr(request.app.state, 'OPENAI_MODELS', None) or {}
+        runtime_id = _resolve_openai_runtime_model_id(model_id, openai_models, db_models)
+
+    runtime_model = openai_models.get(runtime_id) if runtime_id else None
+    if not runtime_model or 'urlIdx' not in runtime_model:
+        raise HTTPException(
+            status_code=400,
+            detail='Selected model is not backed by an OpenAI-compatible connection',
+        )
+
+    base_url, key, api_config = await openai.get_openai_connection(runtime_model['urlIdx'])
+    headers, cookies = await openai.get_headers_and_cookies(
+        request,
+        base_url,
+        key,
+        api_config,
+        metadata=metadata,
+        user=user,
+    )
+    upstream_model_id = strip_provider_model_prefix(runtime_id, api_config.get('prefix_id'))
+
+    return SimpleNamespace(
+        model_id=upstream_model_id,
+        base_url=base_url.rstrip('/'),
+        headers=headers,
+        cookies=cookies,
+        api_config=api_config,
+    )
 
 
 def config_updates(data: dict, key_map: dict[str, str]) -> dict:
@@ -201,6 +293,8 @@ async def set_image_model(request: Request, model: str):
 
 async def get_image_model(request):
     image_config = await get_image_config()
+    if image_config.IMAGE_GENERATION_SOURCE == 'model':
+        return image_config.IMAGE_GENERATION_MODEL_ID
     if image_config.IMAGE_GENERATION_ENGINE == 'openai':
         return image_config.IMAGE_GENERATION_MODEL if image_config.IMAGE_GENERATION_MODEL else 'dall-e-2'
     elif image_config.IMAGE_GENERATION_ENGINE == 'gemini':
@@ -229,6 +323,8 @@ class ImagesConfig(BaseModel):
     ENABLE_IMAGE_GENERATION: bool
     ENABLE_IMAGE_PROMPT_GENERATION: bool
 
+    IMAGE_GENERATION_SOURCE: str = 'custom'
+    IMAGE_GENERATION_MODEL_ID: str = ''
     IMAGE_GENERATION_ENGINE: str
     IMAGE_GENERATION_MODEL: str
     IMAGE_SIZE: str | None
@@ -253,6 +349,8 @@ class ImagesConfig(BaseModel):
     IMAGES_GEMINI_ENDPOINT_METHOD: str
 
     ENABLE_IMAGE_EDIT: bool
+    IMAGE_EDIT_SOURCE: str = 'custom'
+    IMAGE_EDIT_MODEL_ID: str = ''
     IMAGE_EDIT_ENGINE: str
     IMAGE_EDIT_MODEL: str
     IMAGE_EDIT_SIZE: str | None
@@ -275,9 +373,34 @@ async def get_config(request: Request, user=Depends(get_admin_user)):
 
 @router.post('/config/update')
 async def update_config(request: Request, form_data: ImagesConfig, user=Depends(get_admin_user)):
-    if form_data.IMAGE_SIZE == 'auto' and not re.match(
-        IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN, form_data.IMAGE_GENERATION_MODEL
+    if form_data.IMAGE_GENERATION_SOURCE not in {'model', 'custom'}:
+        raise HTTPException(status_code=400, detail='Invalid image generation source')
+    if form_data.IMAGE_EDIT_SOURCE not in {'generation', 'model', 'custom'}:
+        raise HTTPException(status_code=400, detail='Invalid image edit source')
+    if (
+        form_data.ENABLE_IMAGE_GENERATION
+        and form_data.IMAGE_GENERATION_SOURCE == 'model'
+        and not form_data.IMAGE_GENERATION_MODEL_ID
     ):
+        raise HTTPException(status_code=400, detail='Select an existing model for image generation')
+    if form_data.ENABLE_IMAGE_EDIT and form_data.IMAGE_EDIT_SOURCE == 'model' and not form_data.IMAGE_EDIT_MODEL_ID:
+        raise HTTPException(status_code=400, detail='Select an existing model for image editing')
+    if (
+        form_data.ENABLE_IMAGE_EDIT
+        and form_data.IMAGE_EDIT_SOURCE == 'generation'
+        and form_data.IMAGE_GENERATION_SOURCE != 'model'
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail='Same as generation requires image generation to use an existing model',
+        )
+
+    generation_model = (
+        form_data.IMAGE_GENERATION_MODEL_ID
+        if form_data.IMAGE_GENERATION_SOURCE == 'model'
+        else form_data.IMAGE_GENERATION_MODEL
+    )
+    if form_data.IMAGE_SIZE == 'auto' and not re.match(IMAGE_AUTO_SIZE_MODELS_REGEX_PATTERN, generation_model):
         raise HTTPException(
             status_code=400,
             detail=ERROR_MESSAGES.INCORRECT_FORMAT(
@@ -302,7 +425,8 @@ async def update_config(request: Request, form_data: ImagesConfig, user=Depends(
     updates['image_generation.comfyui.base_url'] = form_data.COMFYUI_BASE_URL.strip('/')
     updates['images.edit.comfyui.base_url'] = form_data.IMAGES_EDIT_COMFYUI_BASE_URL.strip('/')
     await Config.upsert(updates)
-    await set_image_model(request, form_data.IMAGE_GENERATION_MODEL)
+    if form_data.IMAGE_GENERATION_SOURCE == 'custom':
+        await set_image_model(request, form_data.IMAGE_GENERATION_MODEL)
     values = await get_config_values(IMAGE_CONFIG_KEYS)
     await publish_event(
         request,
@@ -312,7 +436,11 @@ async def update_config(request: Request, form_data: ImagesConfig, user=Depends(
         data={
             'image_generation_enabled': values.get('ENABLE_IMAGE_GENERATION'),
             'image_edit_enabled': values.get('ENABLE_IMAGE_EDIT'),
+            'image_generation_source': values.get('IMAGE_GENERATION_SOURCE'),
+            'image_generation_model_id': values.get('IMAGE_GENERATION_MODEL_ID'),
             'image_generation_engine': values.get('IMAGE_GENERATION_ENGINE'),
+            'image_edit_source': values.get('IMAGE_EDIT_SOURCE'),
+            'image_edit_model_id': values.get('IMAGE_EDIT_MODEL_ID'),
             'image_edit_engine': values.get('IMAGE_EDIT_ENGINE'),
         },
     )
@@ -361,6 +489,11 @@ async def verify_url(request: Request, user=Depends(get_admin_user)):
             raise HTTPException(status_code=400, detail=ERROR_MESSAGES.INVALID_URL)
     else:
         return True
+
+
+@router.get('/models/registered')
+async def get_registered_models(request: Request, user=Depends(get_admin_user)):
+    return await get_registered_image_models(request, user)
 
 
 @router.get('/models')
@@ -614,6 +747,52 @@ async def image_generations(
     model = await get_image_model(request)
 
     try:
+        if image_config.IMAGE_GENERATION_SOURCE == 'model':
+            connection = await resolve_registered_image_connection(
+                request,
+                image_config.IMAGE_GENERATION_MODEL_ID,
+                user,
+                metadata,
+            )
+            model = connection.model_id
+            headers = connection.headers
+            data = {
+                'model': model,
+                'prompt': form_data.prompt,
+                'n': form_data.n,
+                **(
+                    {'size': form_data.size or image_config.IMAGE_SIZE}
+                    if (form_data.size or image_config.IMAGE_SIZE)
+                    else {}
+                ),
+                **({} if re.match(IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN, model) else {'response_format': 'b64_json'}),
+            }
+
+            session = await get_session()
+            async with session.post(
+                url=f'{connection.base_url}/images/generations',
+                json=data,
+                headers=headers,
+                cookies=connection.cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                r.raise_for_status()
+                res = await r.json(content_type=None)
+
+            images = []
+            for image in res['data']:
+                if image_url := image.get('url', None):
+                    image_data, content_type = await get_image_data(
+                        image_url,
+                        {k: v for k, v in headers.items() if k.lower() != 'content-type'},
+                    )
+                else:
+                    image_data, content_type = await get_image_data(image['b64_json'])
+
+                _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                images.append({'url': url})
+            return images
+
         if image_config.IMAGE_GENERATION_ENGINE == 'openai':
             headers = {
                 'Authorization': f'Bearer {image_config.IMAGES_OPENAI_API_KEY}',
@@ -904,6 +1083,13 @@ async def image_edits(
         size = form_data.size if form_data.size else image_config.IMAGE_EDIT_SIZE
         width, height = tuple(map(int, size.split('x')))
 
+    if image_config.IMAGE_EDIT_SOURCE == 'generation':
+        registered_edit_model_id = image_config.IMAGE_GENERATION_MODEL_ID
+    elif image_config.IMAGE_EDIT_SOURCE == 'model':
+        registered_edit_model_id = image_config.IMAGE_EDIT_MODEL_ID
+    else:
+        registered_edit_model_id = None
+
     model = image_config.IMAGE_EDIT_MODEL if form_data.model is None else form_data.model
 
     try:
@@ -964,6 +1150,67 @@ async def image_edits(
         )
 
     try:
+        if registered_edit_model_id:
+            connection = await resolve_registered_image_connection(request, registered_edit_model_id, user, metadata)
+            model = connection.model_id
+            headers = {k: v for k, v in connection.headers.items() if k.lower() != 'content-type'}
+            data = {
+                'model': model,
+                'prompt': form_data.prompt,
+                **({'n': form_data.n} if form_data.n else {}),
+                **({'size': size} if size else {}),
+                **({'background': form_data.background} if form_data.background else {}),
+                **({} if re.match(IMAGE_URL_RESPONSE_MODELS_REGEX_PATTERN, model) else {'response_format': 'b64_json'}),
+            }
+
+            files = []
+            if isinstance(form_data.image, str):
+                image = form_data.image
+                if ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION:
+                    image = normalize_openai_edit_image_data_url(image)
+                files = [get_image_file_item(image)]
+            elif isinstance(form_data.image, list):
+                for img in form_data.image:
+                    if ENABLE_OPENAI_IMAGE_EDIT_NORMALIZATION:
+                        img = normalize_openai_edit_image_data_url(img)
+                    files.append(get_image_file_item(img, 'image[]'))
+
+            form = aiohttp.FormData()
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    form.add_field(key, json.dumps(value))
+                else:
+                    form.add_field(key, str(value))
+            for param_name, (filename, file_obj, content_type_val) in files:
+                form.add_field(
+                    param_name,
+                    file_obj,
+                    filename=filename,
+                    content_type=content_type_val,
+                )
+
+            session = await get_session()
+            async with session.post(
+                url=f'{connection.base_url}/images/edits',
+                headers=headers,
+                cookies=connection.cookies,
+                data=form,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+            ) as r:
+                r.raise_for_status()
+                res = await r.json(content_type=None)
+
+            images = []
+            for image in res['data']:
+                if image_url := image.get('url', None):
+                    image_data, content_type = await get_image_data(image_url, headers)
+                else:
+                    image_data, content_type = await get_image_data(image['b64_json'])
+
+                _, url = await upload_image(request, image_data, content_type, {**data, **metadata}, user)
+                images.append({'url': url})
+            return images
+
         if image_config.IMAGE_EDIT_ENGINE == 'openai':
             headers = {
                 'Authorization': f'Bearer {image_config.IMAGES_EDIT_OPENAI_API_KEY}',

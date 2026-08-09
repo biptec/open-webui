@@ -7,6 +7,7 @@
 	import { getBackendConfig } from '$lib/apis';
 	import {
 		getImageGenerationModels,
+		getRegisteredImageModels,
 		getImageGenerationConfig,
 		updateImageGenerationConfig,
 		getConfig,
@@ -31,6 +32,7 @@
 	let loading = false;
 
 	let models = null;
+	let registeredModels = [];
 	let config = null;
 	const inputClass =
 		'w-full h-7 rounded-lg border border-gray-100/50 bg-gray-50/40 px-2 text-xs text-gray-700 outline-hidden transition-colors placeholder:text-gray-300 focus:border-blue-400 dark:border-white/[0.04] dark:bg-white/[0.03] dark:text-gray-300 dark:placeholder:text-gray-700 dark:focus:border-blue-500';
@@ -107,8 +109,42 @@
 		});
 	};
 
+	const getRegisteredModels = async () => {
+		registeredModels =
+			(await getRegisteredImageModels(localStorage.token).catch((error) => {
+				toast.error(`${error}`);
+				return [];
+			})) ?? [];
+	};
+
 	const updateConfigHandler = async () => {
 		if (
+			config.ENABLE_IMAGE_GENERATION &&
+			config.IMAGE_GENERATION_SOURCE === 'model' &&
+			!config.IMAGE_GENERATION_MODEL_ID
+		) {
+			toast.error($i18n.t('Select an existing model for image generation.'));
+			return null;
+		}
+		if (
+			config.ENABLE_IMAGE_EDIT &&
+			config.IMAGE_EDIT_SOURCE === 'model' &&
+			!config.IMAGE_EDIT_MODEL_ID
+		) {
+			toast.error($i18n.t('Select an existing model for image editing.'));
+			return null;
+		}
+		if (
+			config.ENABLE_IMAGE_EDIT &&
+			config.IMAGE_EDIT_SOURCE === 'generation' &&
+			config.IMAGE_GENERATION_SOURCE !== 'model'
+		) {
+			toast.error($i18n.t('Same as generation requires an existing generation model.'));
+			return null;
+		}
+
+		if (
+			config.IMAGE_GENERATION_SOURCE === 'custom' &&
 			config.IMAGE_GENERATION_ENGINE === 'automatic1111' &&
 			config.AUTOMATIC1111_BASE_URL === ''
 		) {
@@ -116,17 +152,29 @@
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
-		} else if (config.IMAGE_GENERATION_ENGINE === 'comfyui' && config.COMFYUI_BASE_URL === '') {
+		} else if (
+			config.IMAGE_GENERATION_SOURCE === 'custom' &&
+			config.IMAGE_GENERATION_ENGINE === 'comfyui' &&
+			config.COMFYUI_BASE_URL === ''
+		) {
 			toast.error($i18n.t('ComfyUI Base URL is required.'));
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
-		} else if (config.IMAGE_GENERATION_ENGINE === 'openai' && config.IMAGES_OPENAI_API_KEY === '') {
+		} else if (
+			config.IMAGE_GENERATION_SOURCE === 'custom' &&
+			config.IMAGE_GENERATION_ENGINE === 'openai' &&
+			config.IMAGES_OPENAI_API_KEY === ''
+		) {
 			toast.error($i18n.t('OpenAI API Key is required.'));
 			config.ENABLE_IMAGE_GENERATION = false;
 
 			return null;
-		} else if (config.IMAGE_GENERATION_ENGINE === 'gemini' && config.IMAGES_GEMINI_API_KEY === '') {
+		} else if (
+			config.IMAGE_GENERATION_SOURCE === 'custom' &&
+			config.IMAGE_GENERATION_ENGINE === 'gemini' &&
+			config.IMAGES_GEMINI_API_KEY === ''
+		) {
 			toast.error($i18n.t('Gemini API Key is required.'));
 			config.ENABLE_IMAGE_GENERATION = false;
 
@@ -152,7 +200,9 @@
 		if (res) {
 			if (res.ENABLE_IMAGE_GENERATION) {
 				backendConfig.set(await getBackendConfig());
-				getModels();
+				if (res.IMAGE_GENERATION_SOURCE === 'custom') {
+					getModels();
+				}
 			}
 
 			return res;
@@ -225,14 +275,22 @@
 			});
 
 			if (res) {
-				config = res;
+				config = {
+					IMAGE_GENERATION_SOURCE: 'custom',
+					IMAGE_GENERATION_MODEL_ID: '',
+					IMAGE_EDIT_SOURCE: 'custom',
+					IMAGE_EDIT_MODEL_ID: '',
+					...res
+				};
 			}
 
 			if (!config) {
 				return;
 			}
 
-			if (config.ENABLE_IMAGE_GENERATION) {
+			await getRegisteredModels();
+
+			if (config.ENABLE_IMAGE_GENERATION && config.IMAGE_GENERATION_SOURCE === 'custom') {
 				getModels();
 			}
 
@@ -315,36 +373,78 @@
 
 				<AdminSettingSection title={$i18n.t('Create Image')}>
 					<AdminSettingRow
-						label={$i18n.t('Image Generation Engine')}
-						description={$i18n.t('Choose the provider used for image generation.')}
+						label={$i18n.t('Source')}
+						description={$i18n.t(
+							'Use an existing model connection and its credentials, or configure a standalone image backend.'
+						)}
 					>
 						<SettingsSelect
-							bind:value={config.IMAGE_GENERATION_ENGINE}
-							placeholder={$i18n.t('Select Engine')}
+							bind:value={config.IMAGE_GENERATION_SOURCE}
+							on:change={() => {
+								if (config.IMAGE_GENERATION_SOURCE === 'custom') {
+									getModels();
+									if (config.IMAGE_EDIT_SOURCE === 'generation')
+										config.IMAGE_EDIT_SOURCE = 'custom';
+								}
+							}}
 						>
-							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
-							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
-							<option value="automatic1111">{$i18n.t('Automatic1111')}</option>
-							<option value="gemini">{$i18n.t('Gemini')}</option>
+							<option value="model">{$i18n.t('Existing Model')}</option>
+							<option value="custom">{$i18n.t('Custom Backend')}</option>
 						</SettingsSelect>
 					</AdminSettingRow>
 
+					{#if config.IMAGE_GENERATION_SOURCE === 'custom'}
+						<AdminSettingRow
+							label={$i18n.t('Image Generation Engine')}
+							description={$i18n.t('Choose the provider used for image generation.')}
+						>
+							<SettingsSelect
+								bind:value={config.IMAGE_GENERATION_ENGINE}
+								placeholder={$i18n.t('Select Engine')}
+								on:change={getModels}
+							>
+								<option value="openai">{$i18n.t('Default (Open AI)')}</option>
+								<option value="comfyui">{$i18n.t('ComfyUI')}</option>
+								<option value="automatic1111">{$i18n.t('Automatic1111')}</option>
+								<option value="gemini">{$i18n.t('Gemini')}</option>
+							</SettingsSelect>
+						</AdminSettingRow>
+					{/if}
+
 					{#if config.ENABLE_IMAGE_GENERATION}
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-							<AdminSettingField label={$i18n.t('Model')}>
-								<input
-									list="model-list"
-									class={inputClass}
-									bind:value={config.IMAGE_GENERATION_MODEL}
-									placeholder={$i18n.t('Select a model')}
-									required
-								/>
+							<AdminSettingField
+								label={$i18n.t('Model')}
+								description={config.IMAGE_GENERATION_SOURCE === 'model'
+									? $i18n.t(
+											"Uses the model's existing connection and credentials. Hidden chat models are available."
+										)
+									: undefined}
+							>
+								{#if config.IMAGE_GENERATION_SOURCE === 'model'}
+									<SettingsSelect bind:value={config.IMAGE_GENERATION_MODEL_ID} className="w-full">
+										<option value="">{$i18n.t('Select a model')}</option>
+										{#each registeredModels as model}
+											<option value={model.id}>
+												{model.name}{model.hidden ? ` (${$i18n.t('Hidden')})` : ''}
+											</option>
+										{/each}
+									</SettingsSelect>
+								{:else}
+									<input
+										list="model-list"
+										class={inputClass}
+										bind:value={config.IMAGE_GENERATION_MODEL}
+										placeholder={$i18n.t('Select a model')}
+										required
+									/>
 
-								<datalist id="model-list">
-									{#each models ?? [] as model}
-										<option value={model.id}>{model.name}</option>
-									{/each}
-								</datalist>
+									<datalist id="model-list">
+										{#each models ?? [] as model}
+											<option value={model.id}>{model.name}</option>
+										{/each}
+									</datalist>
+								{/if}
 							</AdminSettingField>
 
 							<AdminSettingField label={$i18n.t('Image Size')}>
@@ -355,7 +455,7 @@
 								/>
 							</AdminSettingField>
 
-							{#if ['comfyui', 'automatic1111', ''].includes(config?.IMAGE_GENERATION_ENGINE)}
+							{#if config.IMAGE_GENERATION_SOURCE === 'custom' && ['comfyui', 'automatic1111', ''].includes(config?.IMAGE_GENERATION_ENGINE)}
 								<AdminSettingField label={$i18n.t('Steps')}>
 									<input
 										class={inputClass}
@@ -379,7 +479,7 @@
 						</AdminSettingRow>
 					{/if}
 
-					{#if config?.IMAGE_GENERATION_ENGINE === 'openai'}
+					{#if config.IMAGE_GENERATION_SOURCE === 'custom' && config?.IMAGE_GENERATION_ENGINE === 'openai'}
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 							<AdminSettingField label={$i18n.t('API Base URL')}>
 								<input
@@ -420,7 +520,7 @@
 								minSize={100}
 							/>
 						</AdminSettingField>
-					{:else if (config?.IMAGE_GENERATION_ENGINE ?? 'automatic1111') === 'automatic1111'}
+					{:else if config.IMAGE_GENERATION_SOURCE === 'custom' && (config?.IMAGE_GENERATION_ENGINE ?? 'automatic1111') === 'automatic1111'}
 						<AdminSettingField
 							label={$i18n.t('Base URL')}
 							description={$i18n.t(
@@ -488,7 +588,7 @@
 								minSize={100}
 							/>
 						</AdminSettingField>
-					{:else if config?.IMAGE_GENERATION_ENGINE === 'comfyui'}
+					{:else if config.IMAGE_GENERATION_SOURCE === 'custom' && config?.IMAGE_GENERATION_ENGINE === 'comfyui'}
 						<AdminSettingField
 							label={$i18n.t('Base URL')}
 							description={$i18n.t('Connect to the ComfyUI server used for generation.')}
@@ -670,7 +770,7 @@
 								</div>
 							</AdminSettingField>
 						{/if}
-					{:else if config?.IMAGE_GENERATION_ENGINE === 'gemini'}
+					{:else if config.IMAGE_GENERATION_SOURCE === 'custom' && config?.IMAGE_GENERATION_ENGINE === 'gemini'}
 						<AdminSettingField
 							label={$i18n.t('Base URL')}
 							description={$i18n.t('Override the Gemini image generation endpoint.')}
@@ -719,34 +819,79 @@
 					</AdminSettingRow>
 
 					<AdminSettingRow
-						label={$i18n.t('Image Edit Engine')}
-						description={$i18n.t('Choose the provider used for image edits.')}
+						label={$i18n.t('Source')}
+						description={$i18n.t(
+							'Reuse the generation model, select another existing model, or configure a standalone backend.'
+						)}
 					>
-						<SettingsSelect
-							bind:value={config.IMAGE_EDIT_ENGINE}
-							placeholder={$i18n.t('Select Engine')}
-						>
-							<option value="openai">{$i18n.t('Default (Open AI)')}</option>
-							<option value="comfyui">{$i18n.t('ComfyUI')}</option>
-							<option value="gemini">{$i18n.t('Gemini')}</option>
+						<SettingsSelect bind:value={config.IMAGE_EDIT_SOURCE}>
+							<option value="generation" disabled={config.IMAGE_GENERATION_SOURCE !== 'model'}>
+								{$i18n.t('Same as Generation')}
+							</option>
+							<option value="model">{$i18n.t('Existing Model')}</option>
+							<option value="custom">{$i18n.t('Custom Backend')}</option>
 						</SettingsSelect>
 					</AdminSettingRow>
 
-					{#if config?.ENABLE_IMAGE_GENERATION && config?.ENABLE_IMAGE_EDIT}
-						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-							<AdminSettingField label={$i18n.t('Model')}>
-								<input
-									list="model-list"
-									class={inputClass}
-									bind:value={config.IMAGE_EDIT_MODEL}
-									placeholder={$i18n.t('Select a model')}
-								/>
+					{#if config.IMAGE_EDIT_SOURCE === 'custom'}
+						<AdminSettingRow
+							label={$i18n.t('Image Edit Engine')}
+							description={$i18n.t('Choose the provider used for image edits.')}
+						>
+							<SettingsSelect
+								bind:value={config.IMAGE_EDIT_ENGINE}
+								placeholder={$i18n.t('Select Engine')}
+							>
+								<option value="openai">{$i18n.t('Default (Open AI)')}</option>
+								<option value="comfyui">{$i18n.t('ComfyUI')}</option>
+								<option value="gemini">{$i18n.t('Gemini')}</option>
+							</SettingsSelect>
+						</AdminSettingRow>
+					{/if}
 
-								<datalist id="model-list">
-									{#each models ?? [] as model}
-										<option value={model.id}>{model.name}</option>
-									{/each}
-								</datalist>
+					{#if config?.ENABLE_IMAGE_EDIT}
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<AdminSettingField
+								label={$i18n.t('Model')}
+								description={config.IMAGE_EDIT_SOURCE !== 'custom'
+									? $i18n.t("Uses the selected model's existing connection and credentials.")
+									: undefined}
+							>
+								{#if config.IMAGE_EDIT_SOURCE === 'generation'}
+									<SettingsSelect
+										value={config.IMAGE_GENERATION_MODEL_ID}
+										disabled={true}
+										className="w-full"
+									>
+										<option value={config.IMAGE_GENERATION_MODEL_ID}>
+											{registeredModels.find(
+												(model) => model.id === config.IMAGE_GENERATION_MODEL_ID
+											)?.name ?? config.IMAGE_GENERATION_MODEL_ID}
+										</option>
+									</SettingsSelect>
+								{:else if config.IMAGE_EDIT_SOURCE === 'model'}
+									<SettingsSelect bind:value={config.IMAGE_EDIT_MODEL_ID} className="w-full">
+										<option value="">{$i18n.t('Select a model')}</option>
+										{#each registeredModels as model}
+											<option value={model.id}>
+												{model.name}{model.hidden ? ` (${$i18n.t('Hidden')})` : ''}
+											</option>
+										{/each}
+									</SettingsSelect>
+								{:else}
+									<input
+										list="edit-model-list"
+										class={inputClass}
+										bind:value={config.IMAGE_EDIT_MODEL}
+										placeholder={$i18n.t('Select a model')}
+									/>
+
+									<datalist id="edit-model-list">
+										{#each models ?? [] as model}
+											<option value={model.id}>{model.name}</option>
+										{/each}
+									</datalist>
+								{/if}
 							</AdminSettingField>
 
 							<AdminSettingField label={$i18n.t('Image Size')}>
@@ -759,7 +904,7 @@
 						</div>
 					{/if}
 
-					{#if config?.IMAGE_EDIT_ENGINE === 'openai'}
+					{#if config.IMAGE_EDIT_SOURCE === 'custom' && config?.IMAGE_EDIT_ENGINE === 'openai'}
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 							<AdminSettingField label={$i18n.t('API Base URL')}>
 								<input
@@ -786,7 +931,7 @@
 								bind:value={config.IMAGES_EDIT_OPENAI_API_VERSION}
 							/>
 						</AdminSettingField>
-					{:else if config?.IMAGE_EDIT_ENGINE === 'comfyui'}
+					{:else if config.IMAGE_EDIT_SOURCE === 'custom' && config?.IMAGE_EDIT_ENGINE === 'comfyui'}
 						<AdminSettingField
 							label={$i18n.t('Base URL')}
 							description={$i18n.t('Connect to the ComfyUI server used for image edits.')}
@@ -958,7 +1103,7 @@
 								</div>
 							</AdminSettingField>
 						{/if}
-					{:else if config?.IMAGE_EDIT_ENGINE === 'gemini'}
+					{:else if config.IMAGE_EDIT_SOURCE === 'custom' && config?.IMAGE_EDIT_ENGINE === 'gemini'}
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 							<AdminSettingField label={$i18n.t('Base URL')}>
 								<input
