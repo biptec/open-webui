@@ -1751,6 +1751,7 @@ export interface ModelConfig {
 	id: string;
 	name: string;
 	meta: ModelMeta;
+	updated_at?: number;
 	base_model_id?: string;
 	params: ModelParams;
 }

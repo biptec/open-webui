@@ -27,6 +27,7 @@
 	} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
+	import { getModelProfileImageUrl, preloadModelProfileImages } from '$lib/utils/modelProfileImage';
 	import { getModels } from '$lib/apis';
 
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
@@ -218,6 +219,9 @@
 	$: primaryValue = selectedValues[0] ?? value ?? '';
 	$: selectedModel = items.find((item) => item.value === primaryValue) ?? '';
 	$: selectedCount = selectedValues.filter(Boolean).length;
+	$: selectedModelIconUrl = selectedModel?.model
+		? getModelProfileImageUrl(selectedModel.model)
+		: null;
 	$: triggerLabel = selectedModel
 		? compareEnabled && selectedCount > 1
 			? `${selectedModel.label} +${selectedCount - 1}`
@@ -268,6 +272,7 @@
 
 	$: if (items) {
 		updateFuse();
+		preloadModelProfileImages(items.map((item) => item.model));
 	}
 
 	$: filteredItems = (
@@ -751,6 +756,16 @@
 				);
 			}}
 		>
+			{#if selectedModelIconUrl}
+				<img
+					src={selectedModelIconUrl}
+					alt=""
+					class="mr-1.5 size-4 shrink-0 self-center rounded-full object-contain"
+					on:error={(e) => {
+						e.currentTarget.src = '/favicon.png';
+					}}
+				/>
+			{/if}
 			<span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
 			<ChevronDown className="ml-1 size-2.5 shrink-0 self-center" strokeWidth="2.5" />
 		</div>
